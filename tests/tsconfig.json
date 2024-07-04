@@ -10,6 +10,7 @@
 			"@wdio/mocha-framework",
 			"webdriverio/async",
 			"expect-webdriverio",
+			"webdriverio/async",
 			"wdio-vscode-service"
 		],
 		"skipLibCheck": true,

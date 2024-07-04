@@ -1,8 +1,11 @@
 import type { Options } from '@wdio/types';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+const isDebugging = process.env.DEBUG === '1';
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
+
 export const config: Options.Testrunner = {
 	//
 	// ====================
@@ -18,27 +21,23 @@ export const config: Options.Testrunner = {
 		},
 	},
 
-	specs: ['./test/specs/**/*.ts'],
-	// Patterns to exclude.
-	exclude: [
-		// 'path/to/excluded/files'
-	],
-	maxInstances: 10,
+	specs: ['./specs/**/*.ts'],
+	debug: isDebugging,
+	execArgv: isDebugging ? ['--inspect'] : [],
+	maxInstances: isDebugging ? 1 : 10,
 	capabilities: [
 		{
-			browserName: 'vscode',
+			browserName: 'vscode', // isDebugging ? 'chrome' : 'vscode',
 			browserVersion: 'stable', // also possible: "insiders" or a specific version e.g. "1.80.0"
 			'wdio:vscodeOptions': {
-				// points to directory where extension package.json is located
-				extensionPath: __dirname,
-				// optional VS Code settings
+				extensionPath: path.join(__dirname, '..'),
+				workspacePath: path.join(__dirname, '..'),
+				filePath: path.join(__dirname, '..', 'README.md'),
 				userSettings: {
 					'editor.fontSize': 14,
 				},
 				vscodeArgs: {
-					// https://github.com/microsoft/vscode/issues/84238
 					noSandbox: true,
-					// https://github.com/microsoft/vscode-test/issues/120
 					disableUpdates: true,
 					skipWelcome: true,
 					skipReleaseNotes: true,
@@ -47,14 +46,9 @@ export const config: Options.Testrunner = {
 				},
 			},
 		},
-		{
-			browserName: 'chrome',
-			'wdio:vscodeOptions': {
-				extensionPath: __dirname,
-			},
-		},
 	],
 	logLevel: 'error',
+	outputDir: 'logs',
 	bail: 0,
 	waitforTimeout: 10000,
 	connectionRetryTimeout: 120000,
@@ -65,7 +59,6 @@ export const config: Options.Testrunner = {
 	// your test setup with almost no effort. Unlike plugins, they don't add new
 	// commands. Instead, they hook themselves up into the test process.
 	services: ['vscode'],
-
 	// Framework you want to run your specs with.
 	// The following are supported: Mocha, Jasmine, and Cucumber
 	// see also: https://webdriver.io/docs/frameworks
@@ -73,19 +66,19 @@ export const config: Options.Testrunner = {
 	// Make sure you have the wdio adapter package for the specific framework installed
 	// before running any tests.
 	framework: 'mocha',
-
 	// Test reporter for stdout.
 	// The only one supported by default is 'dot'
 	// see also: https://webdriver.io/docs/dot-reporter
 	reporters: ['spec'],
-
 	// Options to be passed to Mocha.
 	// See the full list at http://mochajs.org/
 	mochaOpts: {
 		ui: 'bdd',
-		timeout: 60000,
+		timeout: 60 * 60 * 24 * 1000,
 	},
-
+	//
+	// WebdriverIO logs
+	// outputDir: path.join(__dirname, 'logs'),
 	//
 	// =====
 	// Hooks
@@ -182,7 +175,11 @@ export const config: Options.Testrunner = {
 	 */
 	// afterTest: function(test, context, { error, result, duration, passed, retries }) {
 	// },
-
+	afterTest: async function (test, context, { passed }) {
+		if (!passed) {
+			await browser.takeScreenshot();
+		}
+	},
 	/**
 	 * Hook that gets executed after the suite has ended
 	 * @param {object} suite suite details

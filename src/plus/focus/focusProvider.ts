@@ -682,8 +682,9 @@ export class FocusProvider implements Disposable {
 							),
 				  );
 
-			// There was a conversation releated to this line: https://github.com/gitkraken/vscode-gitlens/pull/3200#discussion_r1563347675
-			// but since the code has changed it might be hard to find it, therefore I'm leaving the link here,
+			// There was a conversation https://github.com/gitkraken/vscode-gitlens/pull/3200#discussion_r1563347675
+			// that was related to this piece of code.
+			// But since the code has changed it might be hard to find it, therefore I'm leaving the link here,
 			// because it's still relevant.
 			const myAccounts: Map<string, Account> =
 				await this.container.integrations.getMyCurrentAccounts(supportedFocusIntegrations);

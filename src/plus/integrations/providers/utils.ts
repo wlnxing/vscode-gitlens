@@ -1,6 +1,14 @@
-import type { AnyEntityIdentifierInput, EntityIdentifier } from '@gitkraken/provider-apis';
+import type {
+	AnyEntityIdentifierInput,
+	EntityIdentifier,
+	GitPullRequest,
+	GitPullRequestState,
+} from '@gitkraken/provider-apis';
 import { EntityIdentifierProviderType, EntityType, EntityVersion } from '@gitkraken/provider-apis';
 import type { IssueOrPullRequest } from '../../../git/models/issue';
+import type { PullRequestState } from '../../../git/models/pullRequest';
+import { PullRequest } from '../../../git/models/pullRequest';
+import type { Provider } from '../../../git/models/remoteProvider';
 import { equalsIgnoreCase } from '../../../system/string';
 import type { FocusItem } from '../../focus/focusProvider';
 import type { IntegrationId } from './models';
@@ -45,4 +53,32 @@ export function getProviderIdFromEntityIdentifier(entityIdentifier: EntityIdenti
 		default:
 			return undefined;
 	}
+}
+
+export function fromGitPullRequest(pr: GitPullRequest, provider: Provider): PullRequest {
+	return new PullRequest(
+		provider,
+		{
+			name: pr.author?.name ?? 'Unknown',
+			avatarUrl: pr.author?.avatarUrl ?? '',
+			url: pr.author?.url ?? '',
+		},
+		String(pr.number),
+		pr.id,
+		pr.title,
+		pr.url ?? '',
+		{
+			owner: pr.repository.owner.login,
+			repo: pr.repository.name,
+		},
+		fromGitPullRequestState(pr.state),
+		new Date(pr.createdDate),
+		new Date(pr.updatedDate),
+		pr.closedDate ?? undefined,
+		pr.mergedDate ?? undefined,
+	);
+}
+
+function fromGitPullRequestState(state: GitPullRequestState): PullRequestState {
+	return state === 'OPEN' ? 'opened' : state === 'CLOSED' ? 'closed' : 'merged';
 }

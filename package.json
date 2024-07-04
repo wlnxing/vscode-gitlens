@@ -17556,7 +17556,8 @@
 		"update-emoji": "node ./scripts/generateEmojiShortcodeMap.mjs",
 		"update-licenses": "node ./scripts/generateLicenses.mjs",
 		"-pretest": "yarn run build:tests",
-		"vscode:prepublish": "yarn run bundle"
+		"vscode:prepublish": "yarn run bundle",
+		"test:e2e": "cd tests && yarn e2e"
 	},
 	"dependencies": {
 		"@gitkraken/gitkraken-components": "10.5.1",
@@ -17642,8 +17643,7 @@
 		"webpack": "5.92.0",
 		"webpack-bundle-analyzer": "4.10.2",
 		"webpack-cli": "5.1.4",
-		"webpack-node-externals": "3.0.0",
-		"webpack-require-from": "1.8.6"
+		"webpack-node-externals": "3.0.0"
 	},
 	"resolutions": {
 		"esbuild": "0.21.5",

@@ -17557,7 +17557,7 @@
 		"update-licenses": "node ./scripts/generateLicenses.mjs",
 		"-pretest": "yarn run build:tests",
 		"vscode:prepublish": "yarn run bundle",
-		"test:e2e": "cd tests && yarn e2e"
+		"test:e2e": "wdio run ./tests/wdio.conf.ts"
 	},
 	"dependencies": {
 		"@gitkraken/gitkraken-components": "10.5.1",
@@ -17639,11 +17639,17 @@
 		"terser-webpack-plugin": "5.3.10",
 		"ts-loader": "9.5.1",
 		"tsc-alias": "1.8.10",
-		"typescript": "5.5.1-rc",
 		"webpack": "5.92.0",
 		"webpack-bundle-analyzer": "4.10.2",
 		"webpack-cli": "5.1.4",
-		"webpack-node-externals": "3.0.0"
+		"webpack-node-externals": "3.0.0",
+		"@wdio/cli": "^8.39.0",
+		"@wdio/local-runner": "^8.39.0",
+		"@wdio/mocha-framework": "^8.39.0",
+		"@wdio/spec-reporter": "^8.39.0",
+		"ts-node": "^10.9.2",
+		"typescript": "5.5.3",
+		"wdio-vscode-service": "^6.1.0"
 	},
 	"resolutions": {
 		"esbuild": "0.21.5",

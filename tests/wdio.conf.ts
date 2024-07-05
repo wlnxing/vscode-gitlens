@@ -7,11 +7,6 @@ const __filename = fileURLToPath(import.meta.url); // get the resolved path to t
 const __dirname = path.dirname(__filename); // get the name of the directory
 
 export const config: Options.Testrunner = {
-	//
-	// ====================
-	// Runner Configuration
-	// ====================
-	// WebdriverIO supports running e2e tests as well as unit and component tests.
 	runner: 'local',
 	autoCompileOpts: {
 		autoCompile: true,
@@ -48,7 +43,7 @@ export const config: Options.Testrunner = {
 		},
 	],
 	logLevel: 'error',
-	outputDir: 'logs',
+	outputDir: 'tests/logs',
 	bail: 0,
 	waitforTimeout: 10000,
 	connectionRetryTimeout: 120000,
@@ -74,7 +69,7 @@ export const config: Options.Testrunner = {
 	// See the full list at http://mochajs.org/
 	mochaOpts: {
 		ui: 'bdd',
-		timeout: 60 * 60 * 24 * 1000,
+		timeout: 10000,
 	},
 	//
 	// WebdriverIO logs
@@ -175,11 +170,6 @@ export const config: Options.Testrunner = {
 	 */
 	// afterTest: function(test, context, { error, result, duration, passed, retries }) {
 	// },
-	afterTest: async function (test, context, { passed }) {
-		if (!passed) {
-			await browser.takeScreenshot();
-		}
-	},
 	/**
 	 * Hook that gets executed after the suite has ended
 	 * @param {object} suite suite details

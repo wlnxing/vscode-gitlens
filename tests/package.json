@@ -1,6 +1,7 @@
 {
 	"name": "gitlens_tests",
 	"type": "module",
+	"license": "SEE LICENSE IN LICENSE",
 	"devDependencies": {
 		"@wdio/cli": "^8.39.0",
 		"@wdio/local-runner": "^8.39.0",

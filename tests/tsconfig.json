@@ -4,15 +4,7 @@
 		"module": "ESNext",
 		"target": "es2022",
 		"lib": ["es2022", "dom"],
-		"types": [
-			"node",
-			"@wdio/globals/types",
-			"@wdio/mocha-framework",
-			"webdriverio/async",
-			"expect-webdriverio",
-			"webdriverio/async",
-			"wdio-vscode-service"
-		],
+		"types": ["node", "@wdio/globals/types", "@wdio/mocha-framework", "expect-webdriverio"],
 		"skipLibCheck": true,
 		"noEmit": true,
 		"allowImportingTsExtensions": true,

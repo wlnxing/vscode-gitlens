@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Fixes [#3344](https://github.com/gitkraken/vscode-gitlens/issues/3344) - Make changing the AI key easier
 - Fixes fixes issue with Jira integration not refreshing
+- Fixes [GLVSC-586](https://gitkraken.atlassian.net/browse/GLVSC-586) - Thanks to [PR #3376](https://github.com/gitkraken/vscode-gitlens/pull/3376) by Nikolay ([@nzaytsev](https://github.com/nzaytsev))
 
 ## [15.1.0] - 2024-06-05
 

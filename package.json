@@ -1,16 +1,16 @@
 {
-	"name": "gitlens",
-	"displayName": "GitLens — Git supercharged",
+	"name": "free-senltig",
+	"displayName": "free-senltig",
 	"description": "Supercharge Git within VS Code — Visualize code authorship at a glance via Git blame annotations and CodeLens, seamlessly navigate and explore Git repositories, gain valuable insights via rich visualizations and powerful comparison commands, and so much more",
 	"version": "15.1.0",
 	"engines": {
 		"vscode": "^1.82.0"
 	},
 	"license": "SEE LICENSE IN LICENSE",
-	"publisher": "eamodio",
+	"publisher": "wlnxingdev",
 	"author": {
-		"name": "Eric Amodio",
-		"email": "eamodio@gmail.com"
+		"name": "nobody",
+		"email": "wlnxingdev@outlook.com"
 	},
 	"homepage": "https://gitkraken.com/gitlens",
 	"bugs": {

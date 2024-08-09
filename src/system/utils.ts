@@ -1,6 +1,6 @@
-import type { ColorTheme, TextDocument, TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
-import { version as codeVersion, ColorThemeKind, env, ViewColumn, window, workspace } from 'vscode';
-import { ImageMimetypes, Schemes } from '../constants';
+import type { ColorTheme, Tab, TextDocument, TextDocumentShowOptions, TextEditor } from 'vscode';
+import { version as codeVersion, ColorThemeKind, env, Uri, ViewColumn, window, workspace } from 'vscode';
+import { ImageMimetypes, Schemes, trackableSchemes } from '../constants';
 import { isGitUri } from '../git/gitUri';
 import { executeCoreCommand } from './command';
 import { configuration } from './configuration';
@@ -83,8 +83,34 @@ export function getEditorIfActive(document: TextDocument): TextEditor | undefine
 	return editor != null && editor.document === document ? editor : undefined;
 }
 
+export function getEditorIfVisible(uri: Uri): TextEditor | undefined;
+export function getEditorIfVisible(document: TextDocument): TextEditor | undefined;
+export function getEditorIfVisible(documentOrUri: TextDocument | Uri): TextEditor | undefined {
+	if (documentOrUri instanceof Uri) {
+		const uriString = documentOrUri.toString();
+		return window.visibleTextEditors.find(e => e.document.uri.toString() === uriString);
+	}
+
+	return window.visibleTextEditors.find(e => e.document === documentOrUri);
+}
+
 export function getQuickPickIgnoreFocusOut() {
 	return !configuration.get('advanced.quickPick.closeOnFocusOut');
+}
+
+export function getTabUri(tab: Tab | undefined): Uri | undefined {
+	const input = tab?.input;
+	if (input == null || typeof input !== 'object') return undefined;
+
+	if ('uri' in input && input.uri instanceof Uri) {
+		return input.uri;
+	}
+
+	if ('modified' in input && input.modified instanceof Uri) {
+		return input.modified;
+	}
+
+	return undefined;
 }
 
 export function getWorkspaceFriendlyPath(uri: Uri): string {
@@ -96,17 +122,17 @@ export function getWorkspaceFriendlyPath(uri: Uri): string {
 }
 
 export function hasVisibleTextEditor(uri?: Uri): boolean {
-	if (window.visibleTextEditors.length === 0) return false;
+	const editors = window.visibleTextEditors;
+	if (!editors.length) return false;
 
-	if (uri == null) return window.visibleTextEditors.some(e => isTextEditor(e));
+	if (uri == null) return editors.some(e => isTextEditor(e));
 
-	const url = uri.toString();
-	return window.visibleTextEditors.some(e => e.document.uri.toString() === url && isTextEditor(e));
+	const uriString = uri.toString();
+	return editors.some(e => e.document.uri.toString() === uriString && isTextEditor(e));
 }
 
 export function isActiveDocument(document: TextDocument): boolean {
-	const editor = window.activeTextEditor;
-	return editor != null && editor.document === document;
+	return window.activeTextEditor?.document === document;
 }
 
 export function isDarkTheme(theme: ColorTheme): boolean {
@@ -122,14 +148,20 @@ export function isVirtualUri(uri: Uri): boolean {
 }
 
 export function isVisibleDocument(document: TextDocument): boolean {
-	if (window.visibleTextEditors.length === 0) return false;
-
 	return window.visibleTextEditors.some(e => e.document === document);
 }
 
 export function isTextEditor(editor: TextEditor): boolean {
 	const scheme = editor.document.uri.scheme;
 	return scheme !== Schemes.DebugConsole && scheme !== Schemes.Output && scheme !== Schemes.Terminal;
+}
+
+export function isTrackableTextEditor(editor: TextEditor): boolean {
+	return isTrackableUri(editor.document.uri);
+}
+
+export function isTrackableUri(uri: Uri): boolean {
+	return trackableSchemes.has(uri.scheme);
 }
 
 export async function openEditor(
@@ -204,6 +236,16 @@ export async function openDiffEditor(
 	}
 }
 
+export async function openUrl(url: string): Promise<boolean>;
+export async function openUrl(url?: string): Promise<boolean | undefined>;
+export async function openUrl(url?: string): Promise<boolean | undefined> {
+	if (url == null) return undefined;
+
+	// Pass a string to openExternal to avoid double encoding issues: https://github.com/microsoft/vscode/issues/85930
+	// vscode.d.ts currently says it only supports a Uri, but it actually accepts a string too
+	return (env.openExternal as unknown as (target: string) => Thenable<boolean>)(url);
+}
+
 export async function openWalkthrough(
 	extensionId: string,
 	walkthroughId: string,
@@ -255,12 +297,45 @@ export function supportedInVSCodeVersion(feature: 'language-models') {
 	}
 }
 
-export async function openUrl(url: string): Promise<boolean>;
-export async function openUrl(url?: string): Promise<boolean | undefined>;
-export async function openUrl(url?: string): Promise<boolean | undefined> {
-	if (url == null) return undefined;
+export function tabContainsUri(tab: Tab | undefined, uri: Uri | undefined): boolean {
+	const input = tab?.input;
+	if (uri == null || input == null || typeof input !== 'object') return false;
 
-	// Pass a string to openExternal to avoid double encoding issues: https://github.com/microsoft/vscode/issues/85930
-	// vscode.d.ts currently says it only supports a Uri, but it actually accepts a string too
-	return (env.openExternal as unknown as (target: string) => Thenable<boolean>)(url);
+	const uriString = uri.toString();
+	if ('uri' in input && input.uri instanceof Uri) {
+		return input.uri.toString() === uriString;
+	}
+
+	if ('modified' in input && input.modified instanceof Uri) {
+		return input.modified.toString() === uriString;
+	}
+
+	if ('original' in input && input.original instanceof Uri) {
+		return input.original.toString() === uriString;
+	}
+
+	return false;
+}
+
+const resourceContextKeyValueCache = new Map<string, Thenable<string>>();
+
+export function getResourceContextKeyValue(uri: Uri) {
+	// If we are on a remote connection, VS Code's `TextDocument.uri` uses a `file://` scheme,
+	// but VS Code sets the `resource` context key to a "remote" url in the form of `vscode-remote://<remote-type>+<remote-host?>/<path>`
+	// So we need to try to generate that `vscode-remote://` version, which seems to work by getting the querystring from `env.asExternalUri`
+	if (uri.scheme === 'file' && env.remoteName) {
+		const uriKey = uri.toString();
+		let promise = resourceContextKeyValueCache.get(uriKey);
+		if (promise == null) {
+			promise = env.asExternalUri(uri).then(u => u.query);
+			resourceContextKeyValueCache.set(uriKey, promise);
+			promise.then(
+				() => resourceContextKeyValueCache.delete(uriKey),
+				() => resourceContextKeyValueCache.delete(uriKey),
+			);
+		}
+		return promise;
+	}
+
+	return uri.toString();
 }

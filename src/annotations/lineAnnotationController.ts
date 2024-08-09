@@ -13,7 +13,7 @@ import { Logger } from '../system/logger';
 import { getLogScope, setLogScopeExit } from '../system/logger.scope';
 import type { MaybePausedResult } from '../system/promise';
 import { getSettledValue, pauseOnCancelOrTimeoutMap } from '../system/promise';
-import { isTextEditor } from '../system/utils';
+import { isTrackableTextEditor } from '../system/utils';
 import type { LinesChangeEvent, LineState } from '../trackers/lineTracker';
 import { getInlineDecoration } from './annotations';
 import type { BlameFontOptions } from './gutterBlameAnnotationProvider';
@@ -179,7 +179,7 @@ export class LineAnnotationController implements Disposable {
 		const scope = getLogScope();
 
 		const selections = this.container.lineTracker.selections;
-		if (editor == null || selections == null || !isTextEditor(editor)) {
+		if (editor == null || selections == null || !isTrackableTextEditor(editor)) {
 			setLogScopeExit(
 				scope,
 				` ${GlyphChars.Dot} Skipped because there is no valid editor or no valid selections`,
@@ -205,7 +205,8 @@ export class LineAnnotationController implements Disposable {
 		}
 
 		const trackedDocument = await this.container.documentTracker.getOrAdd(editor.document);
-		if (!trackedDocument.isBlameable && this.suspended) {
+		const status = await trackedDocument?.getStatus();
+		if (!status?.blameable && this.suspended) {
 			if (scope != null) {
 				scope.exitDetails = ` ${GlyphChars.Dot} Skipped because the ${
 					this.suspended

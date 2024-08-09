@@ -1,6 +1,9 @@
 import type { PullRequestState } from '../../../../git/models/pullRequest';
 import { PullRequest } from '../../../../git/models/pullRequest';
 import type { Provider } from '../../../../git/models/remoteProvider';
+import type { Integration } from '../../integration';
+import type { ProviderPullRequest } from '../models';
+import { fromProviderPullRequest } from '../models';
 
 export interface GitLabUser {
 	id: number;
@@ -48,6 +51,7 @@ export interface GitLabIssue {
 export interface GitLabMergeRequest {
 	iid: string;
 	author: {
+		id: string;
 		name: string;
 		avatarUrl: string | null;
 		webUrl: string;
@@ -75,6 +79,7 @@ export interface GitLabMergeRequestREST {
 	id: number;
 	iid: number;
 	author: {
+		id: string;
 		name: string;
 		avatar_url?: string;
 		web_url: string;
@@ -97,6 +102,7 @@ export function fromGitLabMergeRequestREST(
 	return new PullRequest(
 		provider,
 		{
+			id: pr.author?.id ?? '',
 			name: pr.author?.name ?? 'Unknown',
 			avatarUrl: pr.author?.avatar_url ?? '',
 			url: pr.author?.web_url ?? '',
@@ -128,4 +134,19 @@ export interface GitLabProjectREST {
 		};
 		path: string;
 	};
+}
+
+export function fromGitLabMergeRequestProvidersApi(pr: ProviderPullRequest, provider: Integration): PullRequest {
+	const wrappedPr: ProviderPullRequest = {
+		...pr,
+		// @gitkraken/providers-api returns global ID as id, while allover GitLens we use internal ID (iid) that is returned as `number`:
+		id: String(pr.number),
+		// Substitute some defaults that are needed to enable PRs because @gitkraken/providers-api always returns null here:
+		// Discussed: https://github.com/gitkraken/provider-apis-package-js/blob/6ee521eb6b46bbb759d9c68646979c3b25681d90/src/providers/gitlab/gitlab.ts#L597
+		permissions: pr.permissions ?? {
+			canMerge: true,
+			canMergeAndBypassProtections: false,
+		},
+	};
+	return fromProviderPullRequest(wrappedPr, provider);
 }

@@ -2,10 +2,11 @@ import type { CancellationToken, Event, MessageItem } from 'vscode';
 import { EventEmitter, window } from 'vscode';
 import type { DynamicAutolinkReference } from '../../annotations/autolinks';
 import type { AutolinkReference } from '../../config';
+import type { Sources } from '../../constants';
 import type { Container } from '../../container';
 import { AuthenticationError, CancellationError, ProviderRequestClientError } from '../../errors';
 import type { PagedResult } from '../../git/gitProvider';
-import type { Account } from '../../git/models/author';
+import type { Account, UnidentifiedAuthor } from '../../git/models/author';
 import type { DefaultBranch } from '../../git/models/defaultBranch';
 import type { IssueOrPullRequest, SearchedIssue } from '../../git/models/issue';
 import type {
@@ -19,6 +20,7 @@ import { showIntegrationDisconnectedTooManyFailedRequestsWarningMessage } from '
 import { configuration } from '../../system/configuration';
 import { gate } from '../../system/decorators/gate';
 import { debug, log } from '../../system/decorators/log';
+import { first } from '../../system/iterable';
 import { Logger } from '../../system/logger';
 import type { LogScope } from '../../system/logger.scope';
 import { getLogScope } from '../../system/logger.scope';
@@ -130,16 +132,15 @@ export abstract class IntegrationBase<
 	protected _session: ProviderAuthenticationSession | null | undefined;
 	getSession() {
 		if (this._session === undefined) {
-			return this.ensureSession(false);
+			return this.ensureSession({ createIfNeeded: false });
 		}
 		return this._session ?? undefined;
 	}
 
 	@log()
-	async connect(): Promise<boolean> {
+	async connect(source?: Sources): Promise<boolean> {
 		try {
-			const session = await this.ensureSession(true);
-			return Boolean(session);
+			return Boolean(await this.ensureSession({ createIfNeeded: true, source: source }));
 		} catch (ex) {
 			return false;
 		}
@@ -234,11 +235,11 @@ export abstract class IntegrationBase<
 		if (this._session === undefined) return;
 
 		this._session = undefined;
-		void (await this.ensureSession(true, true));
+		void (await this.ensureSession({ createIfNeeded: true, forceNewSession: true }));
 	}
 
 	refresh() {
-		void this.ensureSession(false);
+		void this.ensureSession({ createIfNeeded: false });
 	}
 
 	private requestExceptionCount = 0;
@@ -275,10 +276,12 @@ export abstract class IntegrationBase<
 	}
 
 	@gate()
-	private async ensureSession(
-		createIfNeeded: boolean,
-		forceNewSession: boolean = false,
-	): Promise<ProviderAuthenticationSession | undefined> {
+	private async ensureSession(options: {
+		createIfNeeded?: boolean;
+		forceNewSession?: boolean;
+		source?: Sources;
+	}): Promise<ProviderAuthenticationSession | undefined> {
+		const { createIfNeeded, forceNewSession, source } = options;
 		if (this._session != null) return this._session;
 		if (!configuration.get('integrations.enabled')) return undefined;
 
@@ -294,6 +297,7 @@ export abstract class IntegrationBase<
 			session = await authProvider.getSession(this.authProviderDescriptor, {
 				createIfNeeded: createIfNeeded,
 				forceNewSession: forceNewSession,
+				source: source,
 			});
 		} catch (ex) {
 			await this.container.storage.deleteWorkspace(this.connectedKey);
@@ -413,7 +417,7 @@ export abstract class IntegrationBase<
 
 		const { expiryOverride, ...opts } = options ?? {};
 
-		const currentAccount = this.container.cache.getCurrentAccount(
+		const currentAccount = await this.container.cache.getCurrentAccount(
 			this,
 			() => ({
 				value: (async () => {
@@ -603,7 +607,7 @@ export abstract class HostingIntegration<
 		options?: {
 			avatarSize?: number;
 		},
-	): Promise<Account | undefined> {
+	): Promise<Account | UnidentifiedAuthor | undefined> {
 		const scope = getLogScope();
 
 		const connected = this.maybeConnected ?? (await this.isConnected());
@@ -625,32 +629,41 @@ export abstract class HostingIntegration<
 		options?: {
 			avatarSize?: number;
 		},
-	): Promise<Account | undefined>;
+	): Promise<Account | UnidentifiedAuthor | undefined>;
 
 	@debug()
-	async getDefaultBranch(repo: T): Promise<DefaultBranch | undefined> {
+	async getDefaultBranch(
+		repo: T,
+		options?: { cancellation?: CancellationToken; expiryOverride?: boolean | number },
+	): Promise<DefaultBranch | undefined> {
 		const scope = getLogScope();
 
 		const connected = this.maybeConnected ?? (await this.isConnected());
 		if (!connected) return undefined;
 
-		const defaultBranch = this.container.cache.getRepositoryDefaultBranch(repo, this, () => ({
-			value: (async () => {
-				try {
-					const result = await this.getProviderDefaultBranch(this._session!, repo);
-					this.resetRequestExceptionCount();
-					return result;
-				} catch (ex) {
-					return this.handleProviderException<DefaultBranch | undefined>(ex, scope, undefined);
-				}
-			})(),
-		}));
+		const defaultBranch = this.container.cache.getRepositoryDefaultBranch(
+			repo,
+			this,
+			() => ({
+				value: (async () => {
+					try {
+						const result = await this.getProviderDefaultBranch(this._session!, repo, options?.cancellation);
+						this.resetRequestExceptionCount();
+						return result;
+					} catch (ex) {
+						return this.handleProviderException<DefaultBranch | undefined>(ex, scope, undefined);
+					}
+				})(),
+			}),
+			{ expiryOverride: options?.expiryOverride },
+		);
 		return defaultBranch;
 	}
 
 	protected abstract getProviderDefaultBranch(
 		{ accessToken }: ProviderAuthenticationSession,
 		repo: T,
+		cancellation?: CancellationToken,
 	): Promise<DefaultBranch | undefined>;
 
 	@debug()
@@ -693,7 +706,7 @@ export abstract class HostingIntegration<
 	): Promise<RepositoryMetadata | undefined>;
 
 	async mergePullRequest(
-		pr: PullRequest | { id: string; headRefSha: string },
+		pr: PullRequest,
 		options?: {
 			mergeMethod?: PullRequestMergeMethod;
 		},
@@ -714,7 +727,7 @@ export abstract class HostingIntegration<
 
 	protected abstract mergeProviderPullRequest(
 		session: ProviderAuthenticationSession,
-		pr: PullRequest | { id: string; headRefSha: string },
+		pr: PullRequest,
 		options?: {
 			mergeMethod?: PullRequestMergeMethod;
 		},
@@ -844,7 +857,7 @@ export abstract class HostingIntegration<
 				return undefined;
 			}
 
-			const organization: string = organizations.values().next().value;
+			const organization: string = first(organizations.values())!;
 
 			if (options?.filters != null) {
 				if (!api.providerSupportsIssueFilters(providerId, options.filters)) {
@@ -1055,7 +1068,7 @@ export abstract class HostingIntegration<
 					return undefined;
 				}
 
-				const organization: string = organizations.values().next().value;
+				const organization: string = first(organizations.values())!;
 				try {
 					userAccount = await api.getCurrentUserForInstance(providerId, organization);
 				} catch (ex) {
@@ -1160,15 +1173,18 @@ export abstract class HostingIntegration<
 	async searchMyPullRequests(
 		repo?: T,
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<IntegrationResult<SearchedPullRequest[] | undefined>>;
 	async searchMyPullRequests(
 		repos?: T[],
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<IntegrationResult<SearchedPullRequest[] | undefined>>;
 	@debug()
 	async searchMyPullRequests(
 		repos?: T | T[],
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<IntegrationResult<SearchedPullRequest[] | undefined>> {
 		const scope = getLogScope();
 		const connected = this.maybeConnected ?? (await this.isConnected());
@@ -1180,6 +1196,7 @@ export abstract class HostingIntegration<
 				this._session!,
 				repos != null ? (Array.isArray(repos) ? repos : [repos]) : undefined,
 				cancellation,
+				silent,
 			);
 			return { value: pullRequests, duration: Date.now() - start };
 		} catch (ex) {
@@ -1192,6 +1209,7 @@ export abstract class HostingIntegration<
 		session: ProviderAuthenticationSession,
 		repos?: T[],
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<SearchedPullRequest[] | undefined>;
 
 	async searchPullRequests(

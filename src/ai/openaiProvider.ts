@@ -1,9 +1,11 @@
 import type { CancellationToken } from 'vscode';
 import { window } from 'vscode';
 import { fetch } from '@env/fetch';
+import type { TelemetryEvents } from '../constants';
 import type { Container } from '../container';
 import { CancellationError } from '../errors';
 import { configuration } from '../system/configuration';
+import { sum } from '../system/iterable';
 import type { Storage } from '../system/storage';
 import type { AIModel, AIProvider } from './aiProviderService';
 import { getApiKey as getApiKeyCore, getMaxCharacters } from './aiProviderService';
@@ -13,6 +15,7 @@ const provider = { id: 'openai', name: 'OpenAI' } as const;
 
 export type OpenAIModels =
 	| 'gpt-4o'
+	| 'gpt-4o-mini'
 	| 'gpt-4-turbo'
 	| 'gpt-4-turbo-2024-04-09'
 	| 'gpt-4-turbo-preview'
@@ -35,6 +38,12 @@ const models: OpenAIModel[] = [
 		maxTokens: 128000,
 		provider: provider,
 		default: true,
+	},
+	{
+		id: 'gpt-4o-mini',
+		name: 'GPT-4 Omni Mini',
+		maxTokens: 128000,
+		provider: provider,
 	},
 	{
 		id: 'gpt-4-turbo',
@@ -143,6 +152,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 	async generateMessage(
 		model: OpenAIModel,
 		diff: string,
+		reporting: TelemetryEvents['ai/generate'],
 		promptConfig: {
 			systemPrompt: string;
 			customPrompt: string;
@@ -183,6 +193,9 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 					},
 				],
 			};
+
+			reporting['retry.count'] = retries;
+			reporting['input.length'] = (reporting['input.length'] ?? 0) + sum(request.messages, m => m.content.length);
 
 			const rsp = await this.fetch(apiKey, request, options?.cancellation);
 			if (!rsp.ok) {
@@ -231,6 +244,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 	async generateDraftMessage(
 		model: OpenAIModel,
 		diff: string,
+		reporting: TelemetryEvents['ai/generate'],
 		options?: {
 			cancellation?: CancellationToken;
 			context?: string;
@@ -248,6 +262,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 		return this.generateMessage(
 			model,
 			diff,
+			reporting,
 			{
 				systemPrompt:
 					options?.codeSuggestion === true ? codeSuggestMessageSystemPrompt : cloudPatchMessageSystemPrompt,
@@ -264,6 +279,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 	async generateCommitMessage(
 		model: OpenAIModel,
 		diff: string,
+		reporting: TelemetryEvents['ai/generate'],
 		options?: { cancellation?: CancellationToken; context?: string },
 	): Promise<string | undefined> {
 		let customPrompt = configuration.get('experimental.generateCommitMessagePrompt');
@@ -274,6 +290,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 		return this.generateMessage(
 			model,
 			diff,
+			reporting,
 			{
 				systemPrompt: commitMessageSystemPrompt,
 				customPrompt: customPrompt,
@@ -287,6 +304,7 @@ export class OpenAIProvider implements AIProvider<typeof provider.id> {
 		model: OpenAIModel,
 		message: string,
 		diff: string,
+		reporting: TelemetryEvents['ai/explain'],
 		options?: { cancellation?: CancellationToken },
 	): Promise<string | undefined> {
 		const apiKey = await getApiKey(this.container.storage);
@@ -324,6 +342,9 @@ Do not make any assumptions or invent details that are not supported by the code
 					},
 				],
 			};
+
+			reporting['retry.count'] = retries;
+			reporting['input.length'] = (reporting['input.length'] ?? 0) + sum(request.messages, m => m.content.length);
 
 			const rsp = await this.fetch(apiKey, request, options?.cancellation);
 			if (!rsp.ok) {

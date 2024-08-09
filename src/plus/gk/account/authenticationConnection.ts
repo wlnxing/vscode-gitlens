@@ -11,7 +11,13 @@ import { getLogScope } from '../../../system/logger.scope';
 import { openUrl } from '../../../system/utils';
 import type { ServerConnection } from '../serverConnection';
 
+export const LoginUriPathPrefix = 'login';
 export const AuthenticationUriPathPrefix = 'did-authenticate';
+export const enum AuthenticationContext {
+	Graph = 'graph',
+	Worktrees = 'worktrees',
+	VisualFileHistory = 'visual_file_history',
+}
 
 interface AccountInfo {
 	id: string;
@@ -61,7 +67,12 @@ export class AuthenticationConnection implements Disposable {
 	}
 
 	@debug()
-	async login(scopes: string[], scopeKey: string, signUp: boolean = false): Promise<string> {
+	async login(
+		scopes: string[],
+		scopeKey: string,
+		signUp: boolean = false,
+		context?: AuthenticationContext,
+	): Promise<string> {
 		this.updateStatusBarItem(true);
 
 		// Include a state parameter here to prevent CSRF attacks
@@ -75,9 +86,9 @@ export class AuthenticationConnection implements Disposable {
 
 		const uri = this.container.getGkDevUri(
 			signUp ? 'register' : 'login',
-			`${scopes.includes('gitlens') ? 'source=gitlens&' : ''}state=${encodeURIComponent(
-				gkstate,
-			)}&redirect_uri=${encodeURIComponent(callbackUri.toString(true))}`,
+			`${scopes.includes('gitlens') ? 'source=gitlens&' : ''}${
+				context != null ? `context=${context}&` : ''
+			}state=${encodeURIComponent(gkstate)}&redirect_uri=${encodeURIComponent(callbackUri.toString(true))}`,
 		);
 
 		void (await openUrl(uri.toString(true)));
@@ -113,7 +124,7 @@ export class AuthenticationConnection implements Disposable {
 				new Promise<string>((_, reject) => setTimeout(reject, 120000, 'Cancelled')),
 			]);
 
-			const token = await this.getTokenFromCodeAndState(scopeKey, code, gkstate);
+			const token = await this.getTokenFromCodeAndState(code, gkstate, scopeKey);
 			return token;
 		} finally {
 			this._cancellationSource?.cancel();
@@ -167,10 +178,12 @@ export class AuthenticationConnection implements Disposable {
 		}
 	}
 
-	private async getTokenFromCodeAndState(scopeKey: string, code: string, state: string): Promise<string> {
-		const existingStates = this._pendingStates.get(scopeKey);
-		if (!existingStates?.includes(state)) {
-			throw new Error('Getting token failed: Invalid state');
+	async getTokenFromCodeAndState(code: string, state?: string, scopeKey?: string): Promise<string> {
+		if (state != null && scopeKey != null) {
+			const existingStates = this._pendingStates.get(scopeKey);
+			if (!existingStates?.includes(state)) {
+				throw new Error('Getting token failed: Invalid state');
+			}
 		}
 
 		const rsp = await this.connection.fetchGkDevApi(
@@ -181,7 +194,7 @@ export class AuthenticationConnection implements Disposable {
 					grant_type: 'authorization_code',
 					client_id: 'gitkraken.gitlens',
 					code: code,
-					state: state,
+					state: state ?? '',
 				}),
 			},
 			{

@@ -33,13 +33,18 @@ import { debounce } from '../system/function';
 import { find } from '../system/iterable';
 import type { KeyboardScope } from '../system/keyboard';
 import { basename } from '../system/path';
-import { isTextEditor } from '../system/utils';
+import { getResourceContextKeyValue, isTrackableTextEditor } from '../system/utils';
 import type {
 	DocumentBlameStateChangeEvent,
 	DocumentDirtyIdleTriggerEvent,
 	DocumentDirtyStateChangeEvent,
 } from '../trackers/documentTracker';
-import type { AnnotationContext, AnnotationProviderBase, TextEditorCorrelationKey } from './annotationProvider';
+import type {
+	AnnotationContext,
+	AnnotationProviderBase,
+	AnnotationStatus,
+	TextEditorCorrelationKey,
+} from './annotationProvider';
 import { getEditorCorrelationKey } from './annotationProvider';
 import type { ChangesAnnotationContext } from './gutterChangesAnnotationProvider';
 
@@ -164,7 +169,7 @@ export class FileAnnotationController implements Disposable {
 	}
 
 	private async onActiveTextEditorChanged(editor: TextEditor | undefined) {
-		if (editor != null && !isTextEditor(editor)) return;
+		if (editor != null && !isTrackableTextEditor(editor)) return;
 
 		this._editor = editor;
 		// Logger.log('AnnotationController.onActiveTextEditorChanged', editor && editor.document.uri.fsPath);
@@ -177,10 +182,8 @@ export class FileAnnotationController implements Disposable {
 
 		const provider = this.getProvider(editor);
 		if (provider == null) {
-			void setContext('gitlens:annotationStatus', undefined);
 			void this.detachKeyboardHook();
 		} else {
-			void setContext('gitlens:annotationStatus', provider.statusContextValue);
 			void this.attachKeyboardHook();
 		}
 	}
@@ -201,8 +204,11 @@ export class FileAnnotationController implements Disposable {
 		void this.clearCore(getEditorCorrelationKey(editor));
 	}
 
-	private onDirtyIdleTriggered(e: DocumentDirtyIdleTriggerEvent) {
-		if (!e.document.isBlameable || !configuration.get('fileAnnotations.preserveWhileEditing')) return;
+	private async onDirtyIdleTriggered(e: DocumentDirtyIdleTriggerEvent) {
+		if (!configuration.get('fileAnnotations.preserveWhileEditing')) return;
+
+		const status = await e.document.getStatus();
+		if (!status.blameable) return;
 
 		const editor = window.activeTextEditor;
 		if (editor == null) return;
@@ -292,7 +298,8 @@ export class FileAnnotationController implements Disposable {
 		if (provider == null) return undefined;
 
 		const trackedDocument = await this.container.documentTracker.get(editor!.document);
-		if (!trackedDocument?.isBlameable) return undefined;
+		const status = await trackedDocument?.getStatus();
+		if (!status?.blameable) return undefined;
 
 		return provider.annotationType;
 	}
@@ -318,6 +325,83 @@ export class FileAnnotationController implements Disposable {
 		}
 
 		debouncedRestore(editor);
+	}
+
+	private readonly _annotatedUris = new Set<string>();
+	private readonly _computingUris = new Set<string>();
+
+	async onProviderEditorStatusChanged(editor: TextEditor | undefined, status: AnnotationStatus | undefined) {
+		if (editor == null) return;
+
+		let changed = false;
+		let windowStatus;
+
+		if (this.isInWindowToggle()) {
+			windowStatus = status;
+
+			changed = Boolean(this._annotatedUris.size || this._computingUris.size);
+			this._annotatedUris.clear();
+			this._computingUris.clear();
+		} else {
+			windowStatus = undefined;
+
+			let key = getResourceContextKeyValue(editor.document.uri);
+			if (typeof key !== 'string') {
+				key = await key;
+			}
+
+			switch (status) {
+				case 'computing':
+					if (!this._annotatedUris.has(key)) {
+						this._annotatedUris.add(key);
+						changed = true;
+					}
+
+					if (!this._computingUris.has(key)) {
+						this._computingUris.add(key);
+						changed = true;
+					}
+
+					break;
+				case 'computed': {
+					const provider = this.getProvider(editor);
+					if (provider == null) {
+						if (this._annotatedUris.has(key)) {
+							this._annotatedUris.delete(key);
+							changed = true;
+						}
+					} else if (!this._annotatedUris.has(key)) {
+						this._annotatedUris.add(key);
+						changed = true;
+					}
+
+					if (this._computingUris.has(key)) {
+						this._computingUris.delete(key);
+						changed = true;
+					}
+					break;
+				}
+				default:
+					if (this._annotatedUris.has(key)) {
+						this._annotatedUris.delete(key);
+						changed = true;
+					}
+
+					if (this._computingUris.has(key)) {
+						this._computingUris.delete(key);
+						changed = true;
+					}
+					break;
+			}
+		}
+
+		if (!changed) return;
+
+		await Promise.allSettled([
+			setContext('gitlens:window:annotated', windowStatus),
+			setContext('gitlens:tabs:annotated:computing', [...this._computingUris]),
+			setContext('gitlens:tabs:annotated', [...this._annotatedUris]),
+		]);
 	}
 
 	async show(editor: TextEditor | undefined, type: FileAnnotationType, context?: AnnotationContext): Promise<boolean>;
@@ -362,7 +446,8 @@ export class FileAnnotationController implements Disposable {
 		this._editor = editor;
 
 		const trackedDocument = await this.container.documentTracker.getOrAdd(editor.document);
-		if (!trackedDocument.isBlameable) return false;
+		const status = await trackedDocument?.getStatus();
+		if (!status?.blameable) return false;
 
 		const currentProvider = this.getProvider(editor);
 		if (currentProvider?.annotationType === type) {
@@ -373,14 +458,12 @@ export class FileAnnotationController implements Disposable {
 		const provider = await window.withProgress(
 			{ location: ProgressLocation.Window },
 			async (progress: Progress<{ message: string }>) => {
-				await setContext('gitlens:annotationStatus', 'computing');
+				void this.onProviderEditorStatusChanged(editor, 'computing');
 
 				const computingAnnotations = this.showAnnotationsCore(currentProvider, editor, type, context, progress);
-				const provider = await computingAnnotations;
+				void (await computingAnnotations);
 
-				if (editor === this._editor) {
-					await setContext('gitlens:annotationStatus', provider?.statusContextValue);
-				}
+				void this.onProviderEditorStatusChanged(editor, 'computed');
 
 				return computingAnnotations;
 			},
@@ -415,7 +498,8 @@ export class FileAnnotationController implements Disposable {
 	): Promise<boolean> {
 		if (editor != null && this._toggleModes.get(type) === 'file') {
 			const trackedDocument = await this.container.documentTracker.getOrAdd(editor.document);
-			if ((type === 'changes' && !trackedDocument.isTracked) || !trackedDocument.isBlameable) {
+			const status = await trackedDocument?.getStatus();
+			if ((type === 'changes' && !status?.tracked) || !status?.blameable) {
 				return false;
 			}
 		}
@@ -484,7 +568,10 @@ export class FileAnnotationController implements Disposable {
 		provider.dispose();
 
 		if (!this._annotationProviders.size || key === getEditorCorrelationKey(this._editor)) {
-			await setContext('gitlens:annotationStatus', undefined);
+			if (this._editor != null) {
+				void this.onProviderEditorStatusChanged(this._editor, undefined);
+			}
+
 			await this.detachKeyboardHook();
 		}
 
@@ -542,21 +629,36 @@ export class FileAnnotationController implements Disposable {
 				const { GutterBlameAnnotationProvider } = await import(
 					/* webpackChunkName: "annotations" */ './gutterBlameAnnotationProvider'
 				);
-				provider = new GutterBlameAnnotationProvider(this.container, editor, trackedDocument);
+				provider = new GutterBlameAnnotationProvider(
+					this.container,
+					e => this.onProviderEditorStatusChanged(e.editor, e.status),
+					editor,
+					trackedDocument,
+				);
 				break;
 			}
 			case 'changes': {
 				const { GutterChangesAnnotationProvider } = await import(
 					/* webpackChunkName: "annotations" */ './gutterChangesAnnotationProvider'
 				);
-				provider = new GutterChangesAnnotationProvider(this.container, editor, trackedDocument);
+				provider = new GutterChangesAnnotationProvider(
+					this.container,
+					e => this.onProviderEditorStatusChanged(e.editor, e.status),
+					editor,
+					trackedDocument,
+				);
 				break;
 			}
 			case 'heatmap': {
 				const { GutterHeatmapBlameAnnotationProvider } = await import(
 					/* webpackChunkName: "annotations" */ './gutterHeatmapBlameAnnotationProvider'
 				);
-				provider = new GutterHeatmapBlameAnnotationProvider(this.container, editor, trackedDocument);
+				provider = new GutterHeatmapBlameAnnotationProvider(
+					this.container,
+					e => this.onProviderEditorStatusChanged(e.editor, e.status),
+					editor,
+					trackedDocument,
+				);
 				break;
 			}
 		}

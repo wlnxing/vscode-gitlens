@@ -73,6 +73,7 @@ import { CommitsView } from './views/commitsView';
 import { ContributorsView } from './views/contributorsView';
 import { DraftsView } from './views/draftsView';
 import { FileHistoryView } from './views/fileHistoryView';
+import { LaunchpadView } from './views/launchpadView';
 import { LineHistoryView } from './views/lineHistoryView';
 import { PullRequestView } from './views/pullRequestView';
 import { RemotesView } from './views/remotesView';
@@ -277,6 +278,7 @@ export class Container {
 		this._disposables.push((this._commitsView = new CommitsView(this)));
 		this._disposables.push((this._pullRequestView = new PullRequestView(this)));
 		this._disposables.push((this._fileHistoryView = new FileHistoryView(this)));
+		this._disposables.push((this._launchpadView = new LaunchpadView(this)));
 		this._disposables.push((this._lineHistoryView = new LineHistoryView(this)));
 		this._disposables.push((this._branchesView = new BranchesView(this)));
 		this._disposables.push((this._remotesView = new RemotesView(this)));
@@ -350,7 +352,7 @@ export class Container {
 
 	@log()
 	private async registerGitProviders() {
-		const providers = await getSupportedGitProviders(this);
+		const providers = await getSupportedGitProviders(this, this.authenticationService);
 		for (const provider of providers) {
 			this._disposables.push(this._git.register(provider.descriptor.id, provider));
 		}
@@ -633,14 +635,18 @@ export class Container {
 		return this._context.extension.id;
 	}
 
+	private _authenticationService: IntegrationAuthenticationService | undefined;
+	private get authenticationService() {
+		if (this._authenticationService == null) {
+			this._disposables.push((this._authenticationService = new IntegrationAuthenticationService(this)));
+		}
+		return this._authenticationService;
+	}
+
 	private _integrations: IntegrationService | undefined;
 	get integrations(): IntegrationService {
 		if (this._integrations == null) {
-			const authenticationService = new IntegrationAuthenticationService(this);
-			this._disposables.push(
-				authenticationService,
-				(this._integrations = new IntegrationService(this, authenticationService)),
-			);
+			this._disposables.push((this._integrations = new IntegrationService(this, this.authenticationService)));
 		}
 		return this._integrations;
 	}
@@ -648,6 +654,11 @@ export class Container {
 	private readonly _keyboard: Keyboard;
 	get keyboard() {
 		return this._keyboard;
+	}
+
+	private _launchpadView: LaunchpadView;
+	get launchpadView() {
+		return this._launchpadView;
 	}
 
 	private readonly _lineAnnotationController: LineAnnotationController;

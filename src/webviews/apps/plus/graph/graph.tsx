@@ -1,7 +1,8 @@
 /*global document window*/
-import type { CssVariables, GraphRef, GraphRow } from '@gitkraken/gitkraken-components';
+import type { CssVariables, GraphRef, GraphRefOptData, GraphRow } from '@gitkraken/gitkraken-components';
 import React from 'react';
 import { render, unmountComponentAtNode } from 'react-dom';
+import type { GraphBranchesVisibility } from '../../../../config';
 import type { GitGraphRowType } from '../../../../git/models/graph';
 import type { SearchQuery } from '../../../../git/search';
 import type {
@@ -18,8 +19,10 @@ import type {
 	UpdateStateCallback,
 } from '../../../../plus/webviews/graph/protocol';
 import {
+	ChooseRefRequest,
 	ChooseRepositoryCommand,
 	DidChangeAvatarsNotification,
+	DidChangeBranchStateNotification,
 	DidChangeColumnsNotification,
 	DidChangeGraphConfigurationNotification,
 	DidChangeNotification,
@@ -43,9 +46,9 @@ import {
 	SearchOpenInViewCommand,
 	SearchRequest,
 	UpdateColumnsCommand,
-	UpdateExcludeTypeCommand,
+	UpdateExcludeTypesCommand,
 	UpdateGraphConfigurationCommand,
-	UpdateIncludeOnlyRefsCommand,
+	UpdateIncludedRefsCommand,
 	UpdateRefsVisibilityCommand,
 	UpdateSelectionCommand,
 } from '../../../../plus/webviews/graph/protocol';
@@ -95,17 +98,26 @@ export class GraphApp extends App<State> {
 					nonce={this.state.nonce}
 					state={this.state}
 					subscriber={(updateState: UpdateStateCallback) => this.registerUpdateStateCallback(updateState)}
-					onColumnsChange={debounce<GraphApp['onColumnsChanged']>(
+					onChangeColumns={debounce<GraphApp['onColumnsChanged']>(
 						settings => this.onColumnsChanged(settings),
 						250,
 					)}
-					onRefsVisibilityChange={(refs: GraphExcludedRef[], visible: boolean) =>
+					onChangeExcludeTypes={this.onExcludeTypesChanged.bind(this)}
+					onChangeGraphConfiguration={this.onGraphConfigurationChanged.bind(this)}
+					onChangeRefIncludes={this.onRefIncludesChanged.bind(this)}
+					onChangeRefsVisibility={(refs: GraphExcludedRef[], visible: boolean) =>
 						this.onRefsVisibilityChanged(refs, visible)
 					}
+					onChangeSelection={debounce<GraphApp['onSelectionChanged']>(
+						rows => this.onSelectionChanged(rows),
+						250,
+					)}
 					onChooseRepository={debounce<GraphApp['onChooseRepository']>(() => this.onChooseRepository(), 250)}
 					onDoubleClickRef={(ref, metadata) => this.onDoubleClickRef(ref, metadata)}
 					onDoubleClickRow={(row, preserveFocus) => this.onDoubleClickRow(row, preserveFocus)}
+					onEnsureRowPromise={this.onEnsureRowPromise.bind(this)}
 					onHoverRowPromise={(row: GraphRow) => this.onHoverRowPromise(row)}
+					onJumpToRefPromise={(shift: boolean) => this.onJumpToRefPromise(shift)}
 					onMissingAvatars={(...params) => this.onGetMissingAvatars(...params)}
 					onMissingRefsMetadata={(...params) => this.onGetMissingRefsMetadata(...params)}
 					onMoreRows={(...params) => this.onGetMoreRows(...params)}
@@ -113,14 +125,6 @@ export class GraphApp extends App<State> {
 					onSearch={debounce<GraphApp['onSearch']>((search, options) => this.onSearch(search, options), 250)}
 					onSearchPromise={(...params) => this.onSearchPromise(...params)}
 					onSearchOpenInView={(...params) => this.onSearchOpenInView(...params)}
-					onSelectionChange={debounce<GraphApp['onSelectionChanged']>(
-						rows => this.onSelectionChanged(rows),
-						250,
-					)}
-					onEnsureRowPromise={this.onEnsureRowPromise.bind(this)}
-					onExcludeType={this.onExcludeType.bind(this)}
-					onIncludeOnlyRef={this.onIncludeOnlyRef.bind(this)}
-					onUpdateGraphConfiguration={this.onUpdateGraphConfiguration.bind(this)}
 				/>,
 				$root,
 			);
@@ -159,6 +163,11 @@ export class GraphApp extends App<State> {
 				this.setState(this.state, DidChangeAvatarsNotification);
 				break;
 
+			case DidChangeBranchStateNotification.is(msg):
+				this.state.branchState = msg.params.branchState;
+				this.setState(this.state, DidChangeBranchStateNotification);
+				break;
+
 			case DidChangeHostWindowFocusNotification.is(msg):
 				this.state.windowFocused = msg.params.focused;
 				this.setState(this.state, DidChangeHostWindowFocusNotification);
@@ -175,6 +184,7 @@ export class GraphApp extends App<State> {
 				break;
 
 			case DidChangeRefsVisibilityNotification.is(msg):
+				this.state.branchesVisibility = msg.params.branchesVisibility;
 				this.state.excludeRefs = msg.params.excludeRefs;
 				this.state.excludeTypes = msg.params.excludeTypes;
 				this.state.includeOnlyRefs = msg.params.includeOnlyRefs;
@@ -552,6 +562,16 @@ export class GraphApp extends App<State> {
 	private async onHoverRowPromise(row: GraphRow) {
 		try {
 			return await this.sendRequest(GetRowHoverRequest, { type: row.type as GitGraphRowType, id: row.sha });
+		} catch (ex) {
+			return { id: row.sha, markdown: { status: 'rejected' as const, reason: ex } };
+		}
+	}
+
+	private async onJumpToRefPromise(alt: boolean): Promise<{ name: string; sha: string } | undefined> {
+		try {
+			// Assuming we have a command to get the ref details
+			const rsp = await this.sendRequest(ChooseRefRequest, { alt: alt });
+			return rsp;
 		} catch {
 			return undefined;
 		}
@@ -611,18 +631,15 @@ export class GraphApp extends App<State> {
 		}
 	}
 
-	private onExcludeType(key: keyof GraphExcludeTypes, value: boolean) {
-		this.sendCommand(UpdateExcludeTypeCommand, { key: key, value: value });
+	private onExcludeTypesChanged(key: keyof GraphExcludeTypes, value: boolean) {
+		this.sendCommand(UpdateExcludeTypesCommand, { key: key, value: value });
 	}
 
-	private onIncludeOnlyRef(all?: boolean) {
-		this.sendCommand(
-			UpdateIncludeOnlyRefsCommand,
-			all ? {} : { refs: [{ id: 'HEAD', type: 'head', name: 'HEAD' }] },
-		);
+	private onRefIncludesChanged(branchesVisibility: GraphBranchesVisibility, refs?: GraphRefOptData[]) {
+		this.sendCommand(UpdateIncludedRefsCommand, { branchesVisibility: branchesVisibility, refs: refs });
 	}
 
-	private onUpdateGraphConfiguration(changes: UpdateGraphConfigurationParams['changes']) {
+	private onGraphConfigurationChanged(changes: UpdateGraphConfigurationParams['changes']) {
 		this.sendCommand(UpdateGraphConfigurationCommand, { changes: changes });
 	}
 

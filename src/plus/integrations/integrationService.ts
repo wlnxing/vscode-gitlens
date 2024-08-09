@@ -1,15 +1,17 @@
 import type { AuthenticationSessionsChangeEvent, CancellationToken, Event } from 'vscode';
-import { authentication, Disposable, env, EventEmitter, window } from 'vscode';
+import { authentication, Disposable, env, EventEmitter, ProgressLocation, Uri, window } from 'vscode';
 import { isWeb } from '@env/platform';
 import type { Source } from '../../constants';
+import { sourceToContext } from '../../constants';
 import type { Container } from '../../container';
+import type { Account } from '../../git/models/author';
 import type { SearchedIssue } from '../../git/models/issue';
 import type { SearchedPullRequest } from '../../git/models/pullRequest';
 import type { GitRemote } from '../../git/models/remote';
 import type { RemoteProvider, RemoteProviderId } from '../../git/remotes/remoteProvider';
 import { configuration } from '../../system/configuration';
 import { debug, log } from '../../system/decorators/log';
-import { take } from '../../system/event';
+import { promisifyDeferred, take } from '../../system/event';
 import { filterMap, flatten } from '../../system/iterable';
 import { Logger } from '../../system/logger';
 import { getLogScope } from '../../system/logger.scope';
@@ -17,7 +19,13 @@ import { openUrl } from '../../system/utils';
 import type { SubscriptionChangeEvent } from '../gk/account/subscriptionService';
 import type { IntegrationAuthenticationService } from './authentication/integrationAuthentication';
 import type { SupportedCloudIntegrationIds } from './authentication/models';
-import { isSupportedCloudIntegrationId, supportedCloudIntegrationIds, toIntegrationId } from './authentication/models';
+import {
+	CloudIntegrationAuthenticationUriPathPrefix,
+	isSupportedCloudIntegrationId,
+	iterateSupportedCloudIntegrationIds,
+	toCloudIntegrationType,
+	toIntegrationId,
+} from './authentication/models';
 import type {
 	HostingIntegration,
 	Integration,
@@ -44,6 +52,11 @@ import type { ProvidersApi } from './providers/providersApi';
 export interface ConnectionStateChangeEvent {
 	key: string;
 	reason: 'connected' | 'disconnected';
+}
+
+interface CloudIntegrationConnectionAuth {
+	code: string | undefined;
+	state: string | undefined;
 }
 
 export class IntegrationService implements Disposable {
@@ -86,7 +99,7 @@ export class IntegrationService implements Disposable {
 			connectedProviders = new Set(connections.map(p => toIntegrationId[p.provider]));
 		}
 
-		for (const cloudIntegrationId of supportedCloudIntegrationIds) {
+		for (const cloudIntegrationId of iterateSupportedCloudIntegrationIds()) {
 			const integration = await this.get(cloudIntegrationId);
 			const isConnected = integration.maybeConnected ?? (await integration.isConnected());
 			if (connectedProviders.has(cloudIntegrationId)) {
@@ -139,7 +152,10 @@ export class IntegrationService implements Disposable {
 
 		let query = 'source=gitlens';
 		if (integrationId != null) {
-			query += `&connect=${integrationId}`;
+			const cloudIntegrationType = toCloudIntegrationType[integrationId];
+			if (cloudIntegrationType != null) {
+				query += `&connect=${cloudIntegrationType}`;
+			}
 		}
 
 		try {
@@ -159,6 +175,151 @@ export class IntegrationService implements Disposable {
 				void this.syncCloudIntegrations();
 			}
 		});
+	}
+
+	async connectCloudIntegrations(
+		connect?: { integrationIds: SupportedCloudIntegrationIds[]; skipIfConnected?: boolean },
+		source?: Source,
+	): Promise<boolean> {
+		const scope = getLogScope();
+		const integrationIds = connect?.integrationIds;
+		// TODO: Hook in a telemetry event here
+
+		let account = (await this.container.subscription.getSubscription()).account;
+		const connectedIntegrations = new Set<string>();
+		if (integrationIds != null) {
+			if (connect?.skipIfConnected) {
+				await this.syncCloudIntegrations();
+			}
+
+			for (const integrationId of integrationIds) {
+				const integration = await this.get(integrationId);
+				if (integration.maybeConnected ?? (await integration.isConnected())) {
+					connectedIntegrations.add(integrationId);
+				}
+			}
+
+			if (connect?.skipIfConnected && connectedIntegrations.size === integrationIds.length) {
+				return true;
+			}
+		}
+
+		if (integrationIds && connect?.skipIfConnected) {
+			await this.syncCloudIntegrations();
+			let someDisconnected = false;
+			for (const integrationId of integrationIds) {
+				const integration = await this.get(integrationId);
+				const connected = integration.maybeConnected ?? (await integration.isConnected());
+				if (!connected) {
+					someDisconnected = true;
+					break;
+				}
+			}
+			if (!someDisconnected) return true;
+		}
+
+		let query = 'source=gitlens';
+
+		if (source?.source != null && sourceToContext[source.source] != null) {
+			query += `&context=${sourceToContext[source.source]}`;
+		}
+
+		if (integrationIds != null) {
+			const cloudIntegrationTypes = [];
+			for (const integrationId of integrationIds) {
+				const cloudIntegrationType = toCloudIntegrationType[integrationId];
+				if (cloudIntegrationType == null) {
+					Logger.error(`Attempting to connect unsupported cloud integration type: ${integrationId}`);
+				} else {
+					cloudIntegrationTypes.push(cloudIntegrationType);
+				}
+			}
+			if (cloudIntegrationTypes.length > 0) {
+				query += `&provider=${cloudIntegrationTypes.join(',')}`;
+			}
+		}
+
+		const callbackUri = await env.asExternalUri(
+			Uri.parse(
+				`${env.uriScheme}://${this.container.context.extension.id}/${CloudIntegrationAuthenticationUriPathPrefix}`,
+			),
+		);
+		query += `&redirect_uri=${encodeURIComponent(callbackUri.toString(true))}`;
+
+		if (account != null) {
+			try {
+				const exchangeToken = await this.container.accountAuthentication.getExchangeToken();
+				await openUrl(this.container.getGkDevExchangeUri(exchangeToken, `connect?${query}`).toString(true));
+			} catch (ex) {
+				Logger.error(ex, scope);
+				await env.openExternal(this.container.getGkDevUri('connect', query));
+			}
+		} else {
+			await env.openExternal(this.container.getGkDevUri('connect', query));
+		}
+
+		const deferredCallback = promisifyDeferred<Uri, CloudIntegrationConnectionAuth>(
+			this.container.uri.onDidReceiveCloudIntegrationAuthenticationUri,
+			(uri: Uri, resolve) => {
+				const queryParams: URLSearchParams = new URLSearchParams(uri.query);
+				resolve({
+					code: queryParams.get('code') ?? undefined,
+					state: queryParams.get('state') ?? undefined,
+				});
+			},
+		);
+
+		let authData: CloudIntegrationConnectionAuth = { code: undefined, state: undefined };
+		try {
+			authData = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: 'Connecting cloud integrations...',
+					cancellable: true,
+				},
+				(_, token) => {
+					return Promise.race([
+						deferredCallback.promise,
+						new Promise<CloudIntegrationConnectionAuth>((_, reject) =>
+							// eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+							token.onCancellationRequested(() => reject('Cancelled')),
+						),
+						new Promise<CloudIntegrationConnectionAuth>((_, reject) =>
+							setTimeout(reject, 120000, 'Cancelled'),
+						),
+					]);
+				},
+			);
+		} catch {
+			return false;
+		} finally {
+			deferredCallback.cancel();
+		}
+
+		if (account == null) {
+			if (authData.code == null) return false;
+			await this.container.subscription.loginWithCode(
+				{ code: authData.code, state: authData.state } /*, source: source*/,
+			);
+			account = (await this.container.subscription.getSubscription()).account;
+			if (account == null) return false;
+		}
+
+		await this.syncCloudIntegrations();
+
+		if (integrationIds != null) {
+			for (const integrationId of integrationIds) {
+				const integration = await this.get(integrationId);
+				const connected = integration.maybeConnected ?? (await integration.isConnected());
+				if (connected && !connectedIntegrations.has(integrationId)) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		return true;
 	}
 
 	private onAuthenticationSessionsChanged(e: AuthenticationSessionsChangeEvent) {
@@ -443,12 +604,32 @@ export class IntegrationService implements Disposable {
 		return this.getMyIssuesCore(integrations);
 	}
 
+	@log<IntegrationService['getMyCurrentAccounts']>({
+		args: { 0: integrationIds => (integrationIds?.length ? integrationIds.join(',') : '<undefined>') },
+	})
+	async getMyCurrentAccounts(integrationIds: HostingIntegrationId[]): Promise<Map<HostingIntegrationId, Account>> {
+		const accounts = new Map<HostingIntegrationId, Account>();
+		await Promise.allSettled(
+			integrationIds.map(async integrationId => {
+				const integration = await this.get(integrationId);
+				if (integration == null) return;
+
+				const account = await integration.getCurrentAccount();
+				if (account) {
+					accounts.set(integrationId, account);
+				}
+			}),
+		);
+		return accounts;
+	}
+
 	@log<IntegrationService['getMyPullRequests']>({
 		args: { 0: integrationIds => (integrationIds?.length ? integrationIds.join(',') : '<undefined>'), 1: false },
 	})
 	async getMyPullRequests(
 		integrationIds?: HostingIntegrationId[],
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<IntegrationResult<SearchedPullRequest[] | undefined>> {
 		const integrations: Map<HostingIntegration, ResourceDescriptor[] | undefined> = new Map();
 		for (const integrationId of integrationIds?.length ? integrationIds : Object.values(HostingIntegrationId)) {
@@ -459,12 +640,13 @@ export class IntegrationService implements Disposable {
 		}
 		if (integrations.size === 0) return undefined;
 
-		return this.getMyPullRequestsCore(integrations, cancellation);
+		return this.getMyPullRequestsCore(integrations, cancellation, silent);
 	}
 
 	private async getMyPullRequestsCore(
 		integrations: Map<HostingIntegration, ResourceDescriptor[] | undefined>,
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<IntegrationResult<SearchedPullRequest[] | undefined>> {
 		const start = Date.now();
 
@@ -472,7 +654,7 @@ export class IntegrationService implements Disposable {
 		for (const [integration, repos] of integrations) {
 			if (integration == null) continue;
 
-			promises.push(integration.searchMyPullRequests(repos, cancellation));
+			promises.push(integration.searchMyPullRequests(repos, cancellation, silent));
 		}
 
 		const results = await Promise.allSettled(promises);
@@ -559,6 +741,7 @@ export class IntegrationService implements Disposable {
 		}
 
 		await this.authenticationService.reset();
+		await this.container.storage.deleteWithPrefix('provider:authentication:skip');
 	}
 
 	supports(remoteId: RemoteProviderId): boolean {

@@ -1,11 +1,14 @@
 import type { AuthenticationSession, CancellationToken } from 'vscode';
-import { authentication } from 'vscode';
 import type { Container } from '../../../container';
-import type { Account } from '../../../git/models/author';
+import type { Account, UnidentifiedAuthor } from '../../../git/models/author';
 import type { DefaultBranch } from '../../../git/models/defaultBranch';
 import type { IssueOrPullRequest, SearchedIssue } from '../../../git/models/issue';
-import type { PullRequestMergeMethod, PullRequestState, SearchedPullRequest } from '../../../git/models/pullRequest';
-import { PullRequest } from '../../../git/models/pullRequest';
+import type {
+	PullRequest,
+	PullRequestMergeMethod,
+	PullRequestState,
+	SearchedPullRequest,
+} from '../../../git/models/pullRequest';
 import type { RepositoryMetadata } from '../../../git/models/repositoryMetadata';
 import { log } from '../../../system/decorators/log';
 import { ensurePaidPlan } from '../../utils';
@@ -49,7 +52,7 @@ abstract class GitHubIntegrationBase<ID extends SupportedIntegrationIds> extends
 		options?: {
 			avatarSize?: number;
 		},
-	): Promise<Account | undefined> {
+	): Promise<Account | UnidentifiedAuthor | undefined> {
 		return (await this.container.github)?.getAccountForCommit(this, accessToken, repo.owner, repo.name, ref, {
 			...options,
 			baseUrl: this.apiBaseUrl,
@@ -171,6 +174,7 @@ abstract class GitHubIntegrationBase<ID extends SupportedIntegrationIds> extends
 		{ accessToken }: AuthenticationSession,
 		repos?: GitHubRepositoryDescriptor[],
 		cancellation?: CancellationToken,
+		silent?: boolean,
 	): Promise<SearchedPullRequest[] | undefined> {
 		return (await this.container.github)?.searchMyPullRequests(
 			this,
@@ -178,6 +182,7 @@ abstract class GitHubIntegrationBase<ID extends SupportedIntegrationIds> extends
 			{
 				repos: repos?.map(r => `${r.owner}/${r.name}`),
 				baseUrl: this.apiBaseUrl,
+				silent: silent,
 			},
 			cancellation,
 		);
@@ -219,13 +224,13 @@ abstract class GitHubIntegrationBase<ID extends SupportedIntegrationIds> extends
 
 	protected override async mergeProviderPullRequest(
 		{ accessToken }: AuthenticationSession,
-		pr: PullRequest | { id: string; headRefSha: string },
+		pr: PullRequest,
 		options?: {
 			mergeMethod?: PullRequestMergeMethod;
 		},
 	): Promise<boolean> {
-		const id = pr instanceof PullRequest ? pr.nodeId : pr.id;
-		const headRefSha = pr instanceof PullRequest ? pr.refs?.head?.sha : pr.headRefSha;
+		const id = pr.nodeId;
+		const headRefSha = pr.refs?.head?.sha;
 		if (id == null || headRefSha == null) return false;
 		return (
 			(await this.container.github)?.mergePullRequest(this, accessToken, id, headRefSha, {
@@ -258,13 +263,17 @@ export class GitHubIntegration extends GitHubIntegrationBase<HostingIntegrationI
 		return 'https://api.github.com';
 	}
 
-	// TODO: This is a special case for GitHub because we use VSCode's GitHub session, and it can be disconnected
-	// outside of the extension. Remove this once we use our own GitHub auth provider.
+	// This is a special case for GitHub because we use VSCode's GitHub session, and it can be disconnected
+	// outside of the extension.
 	override async refresh() {
-		const session = await authentication.getSession(this.authProvider.id, this.authProvider.scopes);
+		const authProvider = await this.authenticationService.get(this.authProvider.id);
+		const session = await authProvider.getSession(this.authProviderDescriptor);
 		if (session == null && this.maybeConnected) {
 			void this.disconnect();
 		} else {
+			if (session?.accessToken !== this._session?.accessToken) {
+				this._session = undefined;
+			}
 			super.refresh();
 		}
 	}

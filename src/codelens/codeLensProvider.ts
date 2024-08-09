@@ -18,7 +18,7 @@ import type { ShowQuickFileHistoryCommandArgs } from '../commands/showQuickFileH
 import type { ToggleFileChangesAnnotationCommandArgs } from '../commands/toggleFileAnnotations';
 import type { CodeLensConfig, CodeLensLanguageScope } from '../config';
 import { CodeLensCommand } from '../config';
-import { Commands, Schemes } from '../constants';
+import { Commands, trackableSchemes } from '../constants';
 import type { Container } from '../container';
 import type { GitUri } from '../git/gitUri';
 import type { GitBlame, GitBlameLines } from '../git/models/blame';
@@ -73,16 +73,7 @@ class GitAuthorsCodeLens extends CodeLens {
 }
 
 export class GitCodeLensProvider implements CodeLensProvider {
-	static selector: DocumentSelector = [
-		{ scheme: Schemes.File },
-		{ scheme: Schemes.Git },
-		{ scheme: Schemes.GitLens },
-		{ scheme: Schemes.PRs },
-		{ scheme: Schemes.Vsls },
-		{ scheme: Schemes.VslsScc },
-		{ scheme: Schemes.Virtual },
-		{ scheme: Schemes.GitHub },
-	];
+	static selector: DocumentSelector = [...map(trackableSchemes, scheme => ({ scheme: scheme }))];
 
 	private _onDidChangeCodeLenses = new EventEmitter<void>();
 	get onDidChangeCodeLenses(): Event<void> {
@@ -100,11 +91,12 @@ export class GitCodeLensProvider implements CodeLensProvider {
 		if (document.isDirty && isVirtualUri(document.uri)) return [];
 
 		const trackedDocument = await this.container.documentTracker.getOrAdd(document);
-		if (!trackedDocument.isBlameable) return [];
+		const status = await trackedDocument.getStatus();
+		if (!status.blameable) return [];
 
 		let dirty = false;
 		// Only allow dirty blames if we are idle
-		if (document.isDirty && !trackedDocument.isDirtyIdle) {
+		if (document.isDirty && !status.dirtyIdle) {
 			dirty = true;
 		}
 
@@ -537,9 +529,8 @@ export class GitCodeLensProvider implements CodeLensProvider {
 
 		const count = blame.authors.size;
 		const author = first(blame.authors.values())?.name ?? 'Unknown';
-		const andOthers = count > 1
-			? ` and ${pluralize('one other', count - 1, { only: true, plural: 'others' })}`
-			: '';
+		const andOthers =
+			count > 1 ? ` and ${pluralize('one other', count - 1, { only: true, plural: 'others' })}` : '';
 
 		let title = `${pluralize('author', count, { zero: '?' })} (${author}${andOthers})`;
 		if (configuration.get('debug')) {

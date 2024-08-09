@@ -1,4 +1,8 @@
 import ProviderApis from '@gitkraken/provider-apis';
+import { version as codeVersion, env } from 'vscode';
+import type { Response as FetchResponse } from '@env/fetch';
+import { fetch as _fetch, getProxyAgent } from '@env/fetch';
+import { getPlatform } from '@env/platform';
 import type { Container } from '../../../container';
 import {
 	AuthenticationError,
@@ -7,6 +11,7 @@ import {
 	ProviderRequestRateLimitError,
 } from '../../../errors';
 import type { PagedResult } from '../../../git/gitProvider';
+import type { PullRequest, PullRequestMergeMethod } from '../../../git/models/pullRequest';
 import { base64 } from '../../../system/string';
 import type { IntegrationAuthenticationService } from '../authentication/integrationAuthentication';
 import type {
@@ -41,6 +46,9 @@ import type {
 	ProviderRepoInput,
 	ProviderReposInput,
 	ProviderRepository,
+	ProviderRequestFunction,
+	ProviderRequestOptions,
+	ProviderRequestResponse,
 	Providers,
 	PullRequestFilter,
 } from './models';
@@ -53,7 +61,26 @@ export class ProvidersApi {
 		private readonly container: Container,
 		private readonly authenticationService: IntegrationAuthenticationService,
 	) {
-		const providerApis = ProviderApis();
+		const proxyAgent = getProxyAgent();
+		const userAgent = `${
+			container.debugging ? 'GitLens-Debug' : container.prerelease ? 'GitLens-Pre' : 'GitLens'
+		}/${container.version} (${env.appName}/${codeVersion}; ${getPlatform()})`;
+		const customFetch: ProviderRequestFunction = async <T>({
+			url,
+			...options
+		}: ProviderRequestOptions): Promise<ProviderRequestResponse<T>> => {
+			const response = await _fetch(url, {
+				agent: proxyAgent,
+				...options,
+				headers: {
+					'User-Agent': userAgent,
+					...options.headers,
+				},
+			});
+
+			return parseFetchResponseForApi<T>(response);
+		};
+		const providerApis = ProviderApis({ request: customFetch });
 		this.providers = {
 			[HostingIntegrationId.GitHub]: {
 				...providersMetadata[HostingIntegrationId.GitHub],
@@ -102,6 +129,7 @@ export class ProvidersApi {
 				getIssuesForRepoFn: providerApis.gitlab.getIssuesForRepo.bind(
 					providerApis.gitlab,
 				) as GetIssuesForRepoFn,
+				mergePullRequestFn: providerApis.gitlab.mergePullRequest.bind(providerApis.gitlab),
 			},
 			[SelfHostedIntegrationId.GitLabSelfHosted]: {
 				...providersMetadata[SelfHostedIntegrationId.GitLabSelfHosted],
@@ -629,6 +657,42 @@ export class ProvidersApi {
 		}
 	}
 
+	async mergePullRequest(
+		providerId: IntegrationId,
+		pr: PullRequest,
+		options?: {
+			mergeMethod?: PullRequestMergeMethod;
+		},
+	): Promise<boolean> {
+		const { provider, token } = await this.ensureProviderTokenAndFunction(providerId, 'mergePullRequestFn');
+		const headRef = pr.refs?.head;
+		if (headRef == null) return false;
+
+		try {
+			await provider.mergePullRequestFn?.(
+				{
+					pullRequest: {
+						headRef: { oid: headRef.sha },
+						id: pr.id,
+						number: Number.parseInt(pr.id, 10),
+						repository: {
+							id: pr.repository.repo,
+							name: pr.repository.repo,
+							owner: {
+								login: pr.repository.owner,
+							},
+						},
+					},
+					...options,
+				},
+				{ token: token },
+			);
+			return true;
+		} catch (e) {
+			return this.handleProviderError<boolean>(providerId, token, e);
+		}
+	}
+
 	async getIssuesForRepos(
 		providerId: IntegrationId,
 		reposOrIds: ProviderReposInput,
@@ -706,7 +770,7 @@ export class ProvidersApi {
 
 		try {
 			const result = await provider.getIssuesForProjectFn?.(
-				{ project: project, resourceId: resourceId, ...options },
+				{ projectKey: project, resourceId: resourceId, ...options },
 				{ token: token },
 			);
 
@@ -759,4 +823,40 @@ export class ProvidersApi {
 			return this.handleProviderError<ProviderIssue | undefined>(providerId, token, e);
 		}
 	}
+}
+
+// This is copied over from the shared provider library because the current version is not respecting the "forceIsFetch: true"
+// option in the config and our custom fetch function isn't being wrapped by the necessary fetch wrapper. Remove this once the library
+// properly wraps our custom fetch and use `forceIsFetch: true` in the config.
+async function parseFetchResponseForApi<T>(response: FetchResponse): Promise<ProviderRequestResponse<T>> {
+	const contentType = response.headers.get('content-type') || '';
+	let body = null;
+
+	// parse the response body
+	if (contentType.startsWith('application/json')) {
+		const text = await response.text();
+		body = text.trim().length > 0 ? JSON.parse(text) : null;
+	} else if (contentType.startsWith('text/') || contentType === '') {
+		body = await response.text();
+	} else if (contentType.startsWith('application/vnd.github.raw+json')) {
+		body = await response.arrayBuffer();
+	} else {
+		throw new Error(`Unsupported content-type: ${contentType}`);
+	}
+
+	const result = {
+		body: body,
+		headers: Object.fromEntries(response.headers.entries()),
+		status: response.status,
+		statusText: response.statusText,
+	};
+
+	// throw an error if the response is not ok
+	if (!response.ok) {
+		const error = new Error(response.statusText);
+		Object.assign(error, { response: result });
+		throw error;
+	}
+
+	return result;
 }

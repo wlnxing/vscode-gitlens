@@ -22,7 +22,7 @@ import * as WorktreeActions from '../git/actions/worktree';
 import { GitUri } from '../git/gitUri';
 import { deletedOrMissing } from '../git/models/constants';
 import { matchContributor } from '../git/models/contributor';
-import { getComparisonRefsForPullRequest } from '../git/models/pullRequest';
+import { getComparisonRefsForPullRequest, getOpenedPullRequestRepoPath } from '../git/models/pullRequest';
 import { createReference, shortenRevision } from '../git/models/reference';
 import { RemoteResourceType } from '../git/models/remoteResource';
 import { showPatchesView } from '../plus/drafts/actions';
@@ -42,6 +42,7 @@ import { log } from '../system/decorators/log';
 import { partial, sequentialize } from '../system/function';
 import type { OpenWorkspaceLocation } from '../system/utils';
 import { openUrl, openWorkspace, revealInFileExplorer } from '../system/utils';
+import type { LaunchpadItemNode } from './launchpadView';
 import type { RepositoryFolderNode } from './nodes/abstract/repositoryFolderNode';
 import type { ClipboardType } from './nodes/abstract/viewNode';
 import {
@@ -292,6 +293,7 @@ export class ViewCommands {
 
 		registerViewCommand('gitlens.views.compareAncestryWithWorking', this.compareAncestryWithWorking, this);
 		registerViewCommand('gitlens.views.compareWithHead', this.compareHeadWith, this);
+		registerViewCommand('gitlens.views.compareBranchWithHead', this.compareBranchWithHead, this);
 		registerViewCommand('gitlens.views.compareWithMergeBase', this.compareWithMergeBase, this);
 		registerViewCommand('gitlens.views.compareWithUpstream', this.compareWithUpstream, this);
 		registerViewCommand('gitlens.views.compareWithSelected', this.compareWithSelected, this);
@@ -669,11 +671,16 @@ export class ViewCommands {
 	}
 
 	@log()
-	private async openPullRequestChanges(node: PullRequestNode) {
-		if (!node.is('pullrequest')) return Promise.resolve();
-		if (node.pullRequest.refs?.base == null || node.pullRequest.refs.head == null) return Promise.resolve();
+	private async openPullRequestChanges(node: PullRequestNode | LaunchpadItemNode) {
+		if (!node.is('pullrequest') && !node.is('launchpad-item')) return Promise.resolve();
 
-		const refs = await getComparisonRefsForPullRequest(this.container, node.repoPath, node.pullRequest.refs);
+		const pr = node.pullRequest;
+		if (pr?.refs?.base == null || pr?.refs.head == null) return Promise.resolve();
+
+		const repoPath = await getOpenedPullRequestRepoPath(this.container, pr, node.repoPath);
+		if (repoPath == null) return Promise.resolve();
+
+		const refs = getComparisonRefsForPullRequest(repoPath, pr.refs);
 		return CommitActions.openComparisonChanges(
 			this.container,
 			{
@@ -682,17 +689,22 @@ export class ViewCommands {
 				rhs: refs.head.ref,
 			},
 			{
-				title: `Changes in Pull Request #${node.pullRequest.id}`,
+				title: `Changes in Pull Request #${pr.id}`,
 			},
 		);
 	}
 
 	@log()
-	private async openPullRequestComparison(node: PullRequestNode) {
-		if (!node.is('pullrequest')) return Promise.resolve();
-		if (node.pullRequest.refs?.base == null || node.pullRequest.refs.head == null) return Promise.resolve();
+	private async openPullRequestComparison(node: PullRequestNode | LaunchpadItemNode) {
+		if (!node.is('pullrequest') && !node.is('launchpad-item')) return Promise.resolve();
 
-		const refs = await getComparisonRefsForPullRequest(this.container, node.repoPath, node.pullRequest.refs);
+		const pr = node.pullRequest;
+		if (pr?.refs?.base == null || pr?.refs.head == null) return Promise.resolve();
+
+		const repoPath = await getOpenedPullRequestRepoPath(this.container, pr, node.repoPath);
+		if (repoPath == null) return Promise.resolve();
+
+		const refs = getComparisonRefsForPullRequest(repoPath, pr.refs);
 		return this.container.searchAndCompareView.compare(refs.repoPath, refs.head, refs.base);
 	}
 
@@ -1003,14 +1015,27 @@ export class ViewCommands {
 	}
 
 	@log()
-	private compareHeadWith(node: ViewRefNode | ViewRefFileNode) {
+	private async compareHeadWith(node: ViewRefNode | ViewRefFileNode) {
 		if (node instanceof ViewRefFileNode) {
 			return this.compareFileWith(node.repoPath, node.uri, node.ref.ref, undefined, 'HEAD');
 		}
 
 		if (!(node instanceof ViewRefNode)) return Promise.resolve();
 
-		return this.container.searchAndCompareView.compare(node.repoPath, 'HEAD', node.ref);
+		const [ref1, ref2] = await CommitActions.getOrderedComparisonRefs(
+			this.container,
+			node.repoPath,
+			'HEAD',
+			node.ref.ref,
+		);
+		return this.container.searchAndCompareView.compare(node.repoPath, ref1, ref2);
+	}
+
+	@log()
+	private compareBranchWithHead(node: BranchNode) {
+		if (!(node instanceof ViewRefNode)) return Promise.resolve();
+
+		return this.container.searchAndCompareView.compare(node.repoPath, node.ref, 'HEAD');
 	}
 
 	@log()

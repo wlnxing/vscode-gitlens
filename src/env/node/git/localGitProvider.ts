@@ -10,6 +10,7 @@ import { hrtime } from '@env/hrtime';
 import { isLinux, isWindows } from '@env/platform';
 import type { GitExtension, API as ScmGitApi } from '../../../@types/vscode.git';
 import { getCachedAvatarUri } from '../../../avatars';
+import type { GitConfigKeys } from '../../../constants';
 import { GlyphChars, Schemes } from '../../../constants';
 import type { Container } from '../../../container';
 import { emojify } from '../../../emojis';
@@ -92,7 +93,12 @@ import type {
 import type { GitLog } from '../../../git/models/log';
 import type { GitMergeStatus } from '../../../git/models/merge';
 import type { GitRebaseStatus } from '../../../git/models/rebase';
-import type { GitBranchReference, GitReference, GitTagReference } from '../../../git/models/reference';
+import type {
+	GitBranchReference,
+	GitReference,
+	GitRevisionRange,
+	GitTagReference,
+} from '../../../git/models/reference';
 import {
 	createReference,
 	getBranchTrackingWithoutRemote,
@@ -144,7 +150,7 @@ import {
 	parseGitLogSimpleFormat,
 	parseGitLogSimpleRenamed,
 } from '../../../git/parsers/logParser';
-import { parseGitRefLog } from '../../../git/parsers/reflogParser';
+import { parseGitRefLog, parseGitRefLogDefaultFormat } from '../../../git/parsers/reflogParser';
 import { parseGitRemotes } from '../../../git/parsers/remoteParser';
 import { parseGitStatus } from '../../../git/parsers/statusParser';
 import { parseGitTags } from '../../../git/parsers/tagParser';
@@ -1262,6 +1268,10 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	): Promise<GitCommit | undefined> {
 		const scope = getLogScope();
 
+		if (!contents.endsWith('\n')) {
+			contents += '\n';
+		}
+
 		// Create a temporary index file
 		const tempDir = await fs.mkdtemp(path.join(tmpdir(), 'gl-'));
 		const tempIndex = joinPaths(tempDir, 'index');
@@ -1538,26 +1548,11 @@ export class LocalGitProvider implements GitProvider, Disposable {
 
 	@gate()
 	@log()
-	async pull(
-		repoPath: string,
-		options?: { branch?: GitBranchReference; rebase?: boolean; tags?: boolean },
-	): Promise<void> {
+	async pull(repoPath: string, options?: { rebase?: boolean; tags?: boolean }): Promise<void> {
 		const scope = getLogScope();
-
-		let branch = options?.branch;
-		if (!isBranchReference(branch)) {
-			branch = await this.getBranch(repoPath);
-			if (branch == null) return undefined;
-		}
-
-		const [branchName, remoteName] = getBranchNameAndRemote(branch);
-		if (remoteName == null && branch.upstream == null) return undefined;
 
 		try {
 			await this.git.pull(repoPath, {
-				branch: branchName,
-				remote: remoteName,
-				upstream: getBranchTrackingWithoutRemote(branch),
 				rebase: options?.rebase,
 				tags: options?.tags,
 			});
@@ -1685,13 +1680,13 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		}
 	}
 
-	@log<LocalGitProvider['getAheadBehindCommitCount']>({ args: { 1: refs => refs.join(',') } })
-	getAheadBehindCommitCount(
+	@log()
+	getLeftRightCommitCount(
 		repoPath: string,
-		refs: string[],
-		options?: { authors?: GitUser[] | undefined },
-	): Promise<{ ahead: number; behind: number } | undefined> {
-		return this.git.rev_list__left_right(repoPath, refs, options?.authors);
+		range: GitRevisionRange,
+		options?: { authors?: GitUser[] | undefined; excludeMerges?: boolean },
+	): Promise<{ left: number; right: number } | undefined> {
+		return this.git.rev_list__left_right(repoPath, range, options?.authors, options?.excludeMerges);
 	}
 
 	@gate<LocalGitProvider['getBlame']>((u, d) => `${u.toString()}|${d?.isDirty}`)
@@ -2113,11 +2108,12 @@ export class LocalGitProvider implements GitProvider, Disposable {
 			]);
 
 			const committerDate = getSettledValue(committerDateResult);
+			const rebaseStatus = getSettledValue(rebaseStatusResult);
 
 			branch = new GitBranch(
 				this.container,
 				repoPath,
-				getSettledValue(rebaseStatusResult)?.incoming.name ?? name,
+				rebaseStatus?.incoming.name ?? name,
 				false,
 				true,
 				committerDate != null ? new Date(Number(committerDate) * 1000) : undefined,
@@ -2126,7 +2122,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 				undefined,
 				undefined,
 				undefined,
-				rebaseStatusResult != null,
+				rebaseStatus != null,
 			);
 		}
 
@@ -2158,10 +2154,14 @@ export class LocalGitProvider implements GitProvider, Disposable {
 						const data = await this.git.rev_parse__currentBranch(repoPath!, commitOrdering);
 						if (data != null) {
 							const [name, upstream] = data[0].split('\n');
-							const [rebaseStatus, committerDate] = await Promise.all([
+
+							const [rebaseStatusResult, committerDateResult] = await Promise.allSettled([
 								isDetachedHead(name) ? this.getRebaseStatus(repoPath!) : undefined,
 								this.git.log__recent_committerdate(repoPath!, commitOrdering),
 							]);
+
+							const committerDate = getSettledValue(committerDateResult);
+							const rebaseStatus = getSettledValue(rebaseStatusResult);
 
 							current = new GitBranch(
 								this.container,
@@ -2695,6 +2695,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 							ref: createReference(commit.sha, repoPath, {
 								refType: 'stash',
 								name: stashCommit.name,
+								message: stashCommit.message,
 								number: stashCommit.number,
 							}),
 						},
@@ -2835,11 +2836,11 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		return filterMap(data.split('\n'), b => b.trim() || undefined);
 	}
 
-	getConfig(repoPath: string, key: string): Promise<string | undefined> {
+	getConfig(repoPath: string, key: GitConfigKeys): Promise<string | undefined> {
 		return this.git.config__get(key, repoPath);
 	}
 
-	setConfig(repoPath: string, key: string, value: string | undefined): Promise<void> {
+	setConfig(repoPath: string, key: GitConfigKeys, value: string | undefined): Promise<void> {
 		return this.git.config__set(key, value, repoPath);
 	}
 
@@ -3004,29 +3005,116 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	}
 
 	@log({ exit: true })
+	async getBaseBranchName(repoPath: string, ref: string): Promise<string | undefined> {
+		const mergeBaseConfigKey: GitConfigKeys = `branch.${ref}.gk-merge-base`;
+
+		try {
+			const pattern = `^branch\\.${ref}\\.`;
+			const data = await this.git.config__get_regex(pattern, repoPath);
+			if (data) {
+				const regex = new RegExp(`${pattern}(.+) (.+)$`, 'gm');
+
+				let mergeBase: string | undefined;
+				let update = false;
+				while (true) {
+					const match = regex.exec(data);
+					if (match == null) break;
+
+					const [, key, value] = match;
+					if (key === 'gk-merge-base') {
+						mergeBase = value;
+						update = false;
+						break;
+					} else if (key === 'vscode-merge-base') {
+						mergeBase = value;
+						update = true;
+						continue;
+					}
+				}
+
+				if (mergeBase != null) {
+					const [branch] = (await this.getBranches(repoPath, { filter: b => b.name === mergeBase })).values;
+					if (branch != null) {
+						if (update) {
+							void this.setConfig(repoPath, mergeBaseConfigKey, branch.name);
+						}
+						return branch.name;
+					}
+				}
+			}
+		} catch {}
+
+		const branch = await this.getBaseBranchFromReflog(repoPath, ref);
+		if (branch?.upstream != null) {
+			void this.setConfig(repoPath, mergeBaseConfigKey, branch.upstream.name);
+			return branch.upstream.name;
+		}
+
+		return undefined;
+	}
+
+	private async getBaseBranchFromReflog(repoPath: string, ref: string): Promise<GitBranch | undefined> {
+		try {
+			let data = await this.git.reflog(repoPath, undefined, ref, '--grep-reflog=branch: Created from *.');
+
+			let entries = data.split('\n').filter(entry => Boolean(entry));
+			if (entries.length !== 1) return undefined;
+
+			// Check if branch created from an explicit branch
+			let match = entries[0].match(/branch: Created from (.*)$/);
+			if (match != null && match.length === 2) {
+				const name = match[1];
+				if (name !== 'HEAD') {
+					const [branch] = (await this.getBranches(repoPath, { filter: b => b.name === name })).values;
+					return branch;
+				}
+			}
+
+			// Check if branch was created from HEAD
+			data = await this.git.reflog(
+				repoPath,
+				undefined,
+				'HEAD',
+				`--grep-reflog=checkout: moving from .* to ${ref.replace('refs/heads/', '')}`,
+			);
+			entries = data.split('\n').filter(entry => Boolean(entry));
+
+			if (!entries.length) return undefined;
+
+			match = entries[entries.length - 1].match(/checkout: moving from ([^\s]+)\s/);
+			if (match != null && match.length === 2) {
+				const name = match[1];
+				const [branch] = (await this.getBranches(repoPath, { filter: b => b.name === name })).values;
+				return branch;
+			}
+		} catch {}
+
+		return undefined;
+	}
+
+	@log({ exit: true })
 	async getDefaultBranchName(repoPath: string | undefined, remote?: string): Promise<string | undefined> {
 		if (repoPath == null) return undefined;
 
-		if (!remote) {
+		if (remote) {
 			try {
-				const data = await this.git.symbolic_ref(repoPath, 'HEAD');
-				if (data != null) return data.trim();
+				const data = await this.git.ls_remote__HEAD(repoPath, remote);
+				if (data == null) return undefined;
+
+				const match = /ref:\s(\S+)\s+HEAD/m.exec(data);
+				if (match == null) return undefined;
+
+				const [, branch] = match;
+				return `${remote}/${branch.substr('refs/heads/'.length)}`;
 			} catch {}
 		}
 
-		remote = remote ?? 'origin';
 		try {
-			const data = await this.git.ls_remote__HEAD(repoPath, remote);
-			if (data == null) return undefined;
+			const data = await this.git.symbolic_ref(repoPath, `refs/remotes/origin/HEAD`);
+			if (data != null) return data.trim();
+		} catch {}
 
-			const match = /ref:\s(\S+)\s+HEAD/m.exec(data);
-			if (match == null) return undefined;
-
-			const [, branch] = match;
-			return branch.substr('refs/heads/'.length);
-		} catch {
-			return undefined;
-		}
+		return undefined;
 	}
 
 	@log()
@@ -3302,12 +3390,12 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	@log()
 	async getDiffStatus(
 		repoPath: string,
-		ref1?: string,
+		ref1OrRange: string | GitRevisionRange,
 		ref2?: string,
 		options?: { filters?: GitDiffFilter[]; path?: string; similarityThreshold?: number },
 	): Promise<GitFile[] | undefined> {
 		try {
-			const data = await this.git.diff__name_status(repoPath, ref1, ref2, {
+			const data = await this.git.diff__name_status(repoPath, ref1OrRange, ref2, {
 				similarityThreshold: configuration.get('advanced.similarityThreshold') ?? undefined,
 				...options,
 			});
@@ -4585,14 +4673,29 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	): Promise<GitReflog | undefined> {
 		const scope = getLogScope();
 
-		const limit = options?.limit ?? configuration.get('advanced.maxListItems') ?? 0;
+		const args = ['--walk-reflogs', `--format=${parseGitRefLogDefaultFormat}`, '--date=iso8601'];
+
+		const ordering = options?.ordering ?? configuration.get('advanced.commitOrdering');
+		if (ordering) {
+			args.push(`--${ordering}-order`);
+		}
+
+		if (options?.all) {
+			args.push('--all');
+		}
+
+		// Pass a much larger limit to reflog, because we aggregate the data and we won't know how many lines we'll need
+		const limit = (options?.limit ?? configuration.get('advanced.maxListItems') ?? 0) * 100;
+		if (limit) {
+			args.push(`-n${limit}`);
+		}
+
+		if (options?.skip) {
+			args.push(`--skip=${options.skip}`);
+		}
+
 		try {
-			// Pass a much larger limit to reflog, because we aggregate the data and we won't know how many lines we'll need
-			const data = await this.git.reflog(repoPath, {
-				ordering: configuration.get('advanced.commitOrdering'),
-				...options,
-				limit: limit * 100,
-			});
+			const data = await this.git.log(repoPath, undefined, ...args);
 			if (data == null) return undefined;
 
 			const reflog = parseGitRefLog(data, repoPath, reflogCommands, limit, limit * 100);
@@ -4944,6 +5047,13 @@ export class LocalGitProvider implements GitProvider, Disposable {
 
 	hasUnsafeRepositories(): boolean {
 		return this.unsafePaths.size !== 0;
+	}
+
+	@log()
+	async isAncestorOf(repoPath: string, ref1: string, ref2: string): Promise<boolean> {
+		if (repoPath == null) return false;
+
+		return this.git.merge_base__is_ancestor(repoPath, ref1, ref2);
 	}
 
 	isTrackable(uri: Uri): boolean {

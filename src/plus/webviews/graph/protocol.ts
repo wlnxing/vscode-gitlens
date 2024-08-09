@@ -22,7 +22,7 @@ import type {
 	UpstreamMetadata,
 	WorkDirStats,
 } from '@gitkraken/gitkraken-components';
-import type { Config, DateStyle } from '../../../config';
+import type { Config, DateStyle, GraphBranchesVisibility } from '../../../config';
 import type { RepositoryVisibility } from '../../../git/gitProvider';
 import type { GitTrackingState } from '../../../git/models/branch';
 import type { GitGraphRowType } from '../../../git/models/graph';
@@ -92,6 +92,7 @@ export interface State extends WebviewState {
 	repositories?: GraphRepository[];
 	selectedRepository?: string;
 	selectedRepositoryVisibility?: RepositoryVisibility;
+	branchesVisibility?: GraphBranchesVisibility;
 	branchName?: string;
 	branchState?: BranchState;
 	lastFetched?: Date;
@@ -178,6 +179,7 @@ export interface GraphComponentConfig {
 	enabledRefMetadataTypes?: GraphRefMetadataType[];
 	enableMultiSelection?: boolean;
 	highlightRowsOnRefHover?: boolean;
+	idLength?: number;
 	minimap?: boolean;
 	minimapDataType?: Config['graph']['minimap']['dataType'];
 	minimapMarkerTypes?: GraphMinimapMarkerTypes[];
@@ -186,7 +188,6 @@ export interface GraphComponentConfig {
 	scrollRowPadding?: number;
 	showGhostRefsOnRowHover?: boolean;
 	showRemoteNamesOnRefs?: boolean;
-	idLength?: number;
 }
 
 export interface GraphColumnConfig {
@@ -218,6 +219,12 @@ export type UpdateStateCallback = (
 // COMMANDS
 
 export const ChooseRepositoryCommand = new IpcCommand(scope, 'chooseRepository');
+
+export interface ChooseRefParams {
+	alt: boolean;
+}
+export type DidChooseRefParams = { name: string; sha: string } | undefined;
+export const ChooseRefRequest = new IpcRequest<ChooseRefParams, DidChooseRefParams>(scope, 'chooseRef');
 
 export type DoubleClickedParams =
 	| {
@@ -271,11 +278,11 @@ export interface UpdateRefsVisibilityParams {
 }
 export const UpdateRefsVisibilityCommand = new IpcCommand<UpdateRefsVisibilityParams>(scope, 'refs/update/visibility');
 
-export interface UpdateExcludeTypeParams {
+export interface UpdateExcludeTypesParams {
 	key: keyof GraphExcludeTypes;
 	value: boolean;
 }
-export const UpdateExcludeTypeCommand = new IpcCommand<UpdateExcludeTypeParams>(scope, 'fitlers/update/excludeType');
+export const UpdateExcludeTypesCommand = new IpcCommand<UpdateExcludeTypesParams>(scope, 'filters/update/excludeTypes');
 
 export interface UpdateGraphConfigurationParams {
 	changes: { [key in keyof GraphComponentConfig]?: GraphComponentConfig[key] };
@@ -285,13 +292,11 @@ export const UpdateGraphConfigurationCommand = new IpcCommand<UpdateGraphConfigu
 	'configuration/update',
 );
 
-export interface UpdateIncludeOnlyRefsParams {
+export interface UpdateIncludedRefsParams {
+	branchesVisibility?: GraphBranchesVisibility;
 	refs?: GraphIncludeOnlyRef[];
 }
-export const UpdateIncludeOnlyRefsCommand = new IpcCommand<UpdateIncludeOnlyRefsParams>(
-	scope,
-	'fitlers/update/includeOnlyRefs',
-);
+export const UpdateIncludedRefsCommand = new IpcCommand<UpdateIncludedRefsParams>(scope, 'filters/update/includedRefs');
 
 export interface UpdateSelectionParams {
 	selection: { id: string; type: GitGraphRowType }[];
@@ -317,8 +322,7 @@ export type GetRowHoverParams = {
 
 export interface DidGetRowHoverParams {
 	id: string;
-	markdown?: string;
-	cancelled: boolean;
+	markdown: PromiseSettledResult<string>;
 }
 
 export const GetRowHoverRequest = new IpcRequest<GetRowHoverParams, DidGetRowHoverParams>(scope, 'row/hover/get');
@@ -371,6 +375,14 @@ export interface DidChangeAvatarsParams {
 }
 export const DidChangeAvatarsNotification = new IpcNotification<DidChangeAvatarsParams>(scope, 'avatars/didChange');
 
+export interface DidChangeBranchStateParams {
+	branchState: BranchState;
+}
+export const DidChangeBranchStateNotification = new IpcNotification<DidChangeBranchStateParams>(
+	scope,
+	'branchState/didChange',
+);
+
 export interface DidChangeRefsMetadataParams {
 	metadata: GraphRefsMetadata | null | undefined;
 }
@@ -395,6 +407,7 @@ export const DidChangeScrollMarkersNotification = new IpcNotification<DidChangeS
 );
 
 export interface DidChangeRefsVisibilityParams {
+	branchesVisibility: GraphBranchesVisibility;
 	excludeRefs?: GraphExcludeRefs;
 	excludeTypes?: GraphExcludeTypes;
 	includeOnlyRefs?: GraphIncludeOnlyRefs;

@@ -1,9 +1,13 @@
+import { Uri } from 'vscode';
+import { Schemes } from '../../constants';
 import { Container } from '../../container';
+import type { RepositoryIdentityDescriptor } from '../../gk/models/repositoryIdentities';
 import { formatDate, fromNow } from '../../system/date';
 import { memoize } from '../../system/decorators/memoize';
 import type { IssueOrPullRequest, IssueRepository, IssueOrPullRequestState as PullRequestState } from './issue';
 import { shortenRevision } from './reference';
 import type { ProviderReference } from './remoteProvider';
+import type { Repository } from './repository';
 
 export type { PullRequestState };
 
@@ -56,6 +60,7 @@ export interface PullRequestRefs {
 }
 
 export interface PullRequestMember {
+	id: string;
 	name: string;
 	avatarUrl?: string;
 	url?: string;
@@ -103,6 +108,7 @@ export function serializePullRequest(value: PullRequest): PullRequestShape {
 		closedDate: value.closedDate,
 		closed: value.closed,
 		author: {
+			id: value.author.id,
 			name: value.author.name,
 			avatarUrl: value.author.avatarUrl,
 			url: value.author.url,
@@ -149,6 +155,7 @@ export class PullRequest implements PullRequestShape {
 	constructor(
 		public readonly provider: ProviderReference,
 		public readonly author: {
+			readonly id: string;
 			readonly name: string;
 			readonly avatarUrl?: string;
 			readonly url?: string;
@@ -239,24 +246,72 @@ export interface PullRequestComparisonRefs {
 	head: { ref: string; label: string };
 }
 
-export async function getComparisonRefsForPullRequest(
-	container: Container,
-	repoPath: string,
-	prRefs: PullRequestRefs,
-): Promise<PullRequestComparisonRefs> {
+export function getComparisonRefsForPullRequest(repoPath: string, prRefs: PullRequestRefs): PullRequestComparisonRefs {
 	const refs: PullRequestComparisonRefs = {
 		repoPath: repoPath,
 		base: { ref: prRefs.base.sha, label: `${prRefs.base.branch} (${shortenRevision(prRefs.base.sha)})` },
 		head: { ref: prRefs.head.sha, label: prRefs.head.branch },
 	};
+	return refs;
+}
 
-	// Find the merge base to show a more accurate comparison for the PR
-	const mergeBase =
-		(await container.git.getMergeBase(refs.repoPath, refs.base.ref, refs.head.ref, { forkPoint: true })) ??
-		(await container.git.getMergeBase(refs.repoPath, refs.base.ref, refs.head.ref));
-	if (mergeBase != null) {
-		refs.base = { ref: mergeBase, label: `${prRefs.base.branch} (${shortenRevision(mergeBase)})` };
+export type PullRequestRepositoryIdentityDescriptor = RequireSomeWithProps<
+	RequireSome<RepositoryIdentityDescriptor<string>, 'remote' | 'provider'>,
+	'provider',
+	'id' | 'domain' | 'repoDomain' | 'repoName'
+>;
+
+export function getRepositoryIdentityForPullRequest(pr: PullRequest): PullRequestRepositoryIdentityDescriptor {
+	return {
+		remote: {
+			url: pr.refs?.head?.url,
+			domain: pr.provider.domain,
+		},
+		name: pr.repository.repo,
+		provider: {
+			id: pr.provider.id,
+			domain: pr.provider.domain,
+			repoDomain: pr.refs?.head?.owner ?? pr.repository.owner,
+			repoName: pr.refs?.head?.repo ?? pr.repository.repo,
+		},
+	};
+}
+
+export function getVirtualUriForPullRequest(pr: PullRequest): Uri | undefined {
+	if (pr.provider.id !== 'github') return undefined;
+
+	const uri = Uri.parse(pr.refs?.base?.url ?? pr.url);
+	return uri.with({ scheme: Schemes.Virtual, authority: 'github', path: uri.path });
+}
+
+export async function getOrOpenPullRequestRepository(
+	container: Container,
+	pr: PullRequest,
+): Promise<Repository | undefined> {
+	const identity = getRepositoryIdentityForPullRequest(pr);
+	let repo = await container.repositoryIdentity.getRepository(identity, {
+		openIfNeeded: true,
+		keepOpen: false,
+		prompt: false,
+	});
+
+	if (repo != null) return repo;
+
+	const virtualUri = getVirtualUriForPullRequest(pr);
+	if (virtualUri != null) {
+		repo = await container.git.getOrOpenRepository(virtualUri, { closeOnOpen: true, detectNested: false });
 	}
 
-	return refs;
+	return repo;
+}
+
+export async function getOpenedPullRequestRepoPath(
+	container: Container,
+	pr: PullRequest,
+	repoPath?: string,
+): Promise<string | undefined> {
+	if (repoPath) return repoPath;
+
+	const repo = await getOrOpenPullRequestRepository(container, pr);
+	return repo?.path;
 }

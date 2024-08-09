@@ -6,7 +6,7 @@ import { debug } from '../system/decorators/log';
 import type { Deferrable } from '../system/function';
 import { debounce } from '../system/function';
 import { getLogScope, setLogScopeExit } from '../system/logger.scope';
-import { isTextEditor } from '../system/utils';
+import { isTrackableTextEditor } from '../system/utils';
 import type {
 	DocumentBlameStateChangeEvent,
 	DocumentContentChangeEvent,
@@ -58,7 +58,7 @@ export class LineTracker {
 
 	private onActiveTextEditorChanged(editor: TextEditor | undefined) {
 		if (editor === this._editor) return;
-		if (editor != null && !isTextEditor(editor)) return;
+		if (editor != null && !isTrackableTextEditor(editor)) return;
 
 		this._editor = editor;
 		this._selections = toLineSelections(editor?.selections);
@@ -72,7 +72,7 @@ export class LineTracker {
 
 	@debug<LineTracker['onBlameStateChanged']>({
 		args: {
-			0: e => `editor/doc=${e.editor.document.uri.toString(true)}, blameable=${e.blameable}`,
+			0: e => `editor/doc=${e.editor?.document.uri.toString(true)}, blameable=${e.blameable}`,
 		},
 	})
 	private onBlameStateChanged(_e: DocumentBlameStateChangeEvent) {
@@ -123,7 +123,7 @@ export class LineTracker {
 
 	private onTextEditorSelectionChanged(e: TextEditorSelectionChangeEvent) {
 		// If this isn't for our cached editor and its not a real editor -- kick out
-		if (this._editor !== e.textEditor && !isTextEditor(e.textEditor)) return;
+		if (this._editor !== e.textEditor && !isTrackableTextEditor(e.textEditor)) return;
 
 		const selections = toLineSelections(e.selections);
 		if (this._editor === e.textEditor && this.includes(selections)) return;
@@ -339,7 +339,8 @@ export class LineTracker {
 		}
 
 		const document = await this.documentTracker.getOrAdd(editor.document);
-		if (!document.isBlameable) {
+		let status = await document.getStatus();
+		if (!status.blameable) {
 			setLogScopeExit(scope, ` \u2022 document is not blameable`);
 
 			return false;
@@ -394,7 +395,9 @@ export class LineTracker {
 			return false;
 		}
 
-		if (!document.isBlameable) {
+		status = await document.getStatus();
+
+		if (!status.blameable) {
 			setLogScopeExit(scope, ` \u2022 document is not blameable`);
 
 			return false;

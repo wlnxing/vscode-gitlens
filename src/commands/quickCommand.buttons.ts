@@ -62,6 +62,11 @@ export const ClearQuickInputButton: QuickInputButton = {
 	tooltip: 'Clear',
 };
 
+export const ConnectIntegrationButton: QuickInputButton = {
+	iconPath: new ThemeIcon('plug'),
+	tooltip: 'Connect Additional Integrations',
+};
+
 export const FeedbackQuickInputButton: QuickInputButton = {
 	iconPath: new ThemeIcon('feedback'),
 	tooltip: 'Give Us Feedback',
@@ -125,6 +130,11 @@ export const MergeQuickInputButton: QuickInputButton = {
 export const OpenOnGitHubQuickInputButton: QuickInputButton = {
 	iconPath: new ThemeIcon('globe'),
 	tooltip: 'Open on GitHub',
+};
+
+export const OpenOnGitLabQuickInputButton: QuickInputButton = {
+	iconPath: new ThemeIcon('globe'),
+	tooltip: 'Open on GitLab',
 };
 
 export const OpenOnWebQuickInputButton: QuickInputButton = {
@@ -198,7 +208,7 @@ export const ShowResultsInSideBarQuickInputButton: QuickInputButton = {
 
 export const OpenWorktreeInNewWindowQuickInputButton: QuickInputButton = {
 	iconPath: new ThemeIcon('empty-window'),
-	tooltip: 'Open Worktree in New Window',
+	tooltip: 'Open in Worktree',
 };
 
 export const ShowTagsToggleQuickInputButton = class extends SelectableQuickInputButton {

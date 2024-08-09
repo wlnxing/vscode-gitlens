@@ -1,4 +1,5 @@
 import type { AuthenticationSession, CancellationToken } from 'vscode';
+import { window } from 'vscode';
 import type { Container } from '../../../container';
 import type { Account } from '../../../git/models/author';
 import type { DefaultBranch } from '../../../git/models/defaultBranch';
@@ -11,14 +12,21 @@ import type {
 } from '../../../git/models/pullRequest';
 import type { RepositoryMetadata } from '../../../git/models/repositoryMetadata';
 import { log } from '../../../system/decorators/log';
+import { uniqueBy } from '../../../system/iterable';
 import { ensurePaidPlan } from '../../utils';
 import type {
 	IntegrationAuthenticationProviderDescriptor,
 	IntegrationAuthenticationService,
 } from '../authentication/integrationAuthentication';
-import type { SupportedIntegrationIds } from '../integration';
 import { HostingIntegration } from '../integration';
-import { HostingIntegrationId, providersMetadata, SelfHostedIntegrationId } from './models';
+import { fromGitLabMergeRequestProvidersApi } from './gitlab/models';
+import type { ProviderPullRequest } from './models';
+import {
+	HostingIntegrationId,
+	ProviderPullRequestReviewState,
+	providersMetadata,
+	SelfHostedIntegrationId,
+} from './models';
 import type { ProvidersApi } from './providersApi';
 
 const metadata = providersMetadata[HostingIntegrationId.GitLab];
@@ -39,10 +47,9 @@ export type GitLabRepositoryDescriptor = {
 	name: string;
 };
 
-abstract class GitLabIntegrationBase<ID extends SupportedIntegrationIds> extends HostingIntegration<
-	ID,
-	GitLabRepositoryDescriptor
-> {
+abstract class GitLabIntegrationBase<
+	ID extends HostingIntegrationId.GitLab | SelfHostedIntegrationId.GitLabSelfHosted,
+> extends HostingIntegration<ID, GitLabRepositoryDescriptor> {
 	protected abstract get apiBaseUrl(): string;
 
 	protected override async getProviderAccountForCommit(
@@ -153,11 +160,90 @@ abstract class GitLabIntegrationBase<ID extends SupportedIntegrationIds> extends
 		);
 	}
 
-	protected override searchProviderMyPullRequests(
-		_session: AuthenticationSession,
-		_repo?: GitLabRepositoryDescriptor[],
+	protected override async searchProviderMyPullRequests(
+		{ accessToken }: AuthenticationSession,
+		repos?: GitLabRepositoryDescriptor[],
 	): Promise<SearchedPullRequest[] | undefined> {
-		return Promise.resolve(undefined);
+		const api = await this.getProvidersApi();
+		const username = (await this.getCurrentAccount())?.username;
+		if (!username) {
+			return Promise.resolve([]);
+		}
+		const apiResult = await api.getPullRequestsForUser(this.id, username, {
+			accessToken: accessToken,
+		});
+
+		if (apiResult == null) {
+			return Promise.resolve([]);
+		}
+
+		// now I'm going to filter prs from the result according to the repos parameter
+		let prs;
+		if (repos != null) {
+			const repoMap = new Map<string, GitLabRepositoryDescriptor>();
+			for (const repo of repos) {
+				repoMap.set(`${repo.owner}/${repo.name}`, repo);
+			}
+			prs = apiResult.values.filter(pr => {
+				const repo = repoMap.get(`${pr.repository.owner.login}/${pr.repository.name}`);
+				return repo != null;
+			});
+		} else {
+			prs = apiResult.values;
+		}
+
+		const toQueryResult = (pr: ProviderPullRequest, reason?: string): SearchedPullRequest => {
+			return {
+				pullRequest: fromGitLabMergeRequestProvidersApi(pr, this),
+				reasons: reason ? [reason] : [],
+			};
+		};
+
+		function uniqueWithReasons<T extends { reasons: string[] }>(items: T[], lookup: (item: T) => unknown): T[] {
+			return [
+				...uniqueBy(items, lookup, (original, current) => {
+					if (current.reasons.length !== 0) {
+						original.reasons.push(...current.reasons);
+					}
+					return original;
+				}),
+			];
+		}
+
+		const results: SearchedPullRequest[] = uniqueWithReasons(
+			[
+				...prs.flatMap(pr => {
+					const result: SearchedPullRequest[] = [];
+					if (pr.assignees?.some(a => a.username === username)) {
+						result.push(toQueryResult(pr, 'assigned'));
+					}
+
+					if (
+						pr.reviews?.some(
+							review =>
+								review.reviewer?.username === username ||
+								review.state === ProviderPullRequestReviewState.ReviewRequested,
+						)
+					) {
+						result.push(toQueryResult(pr, 'review-requested'));
+					}
+
+					if (pr.author?.username === username) {
+						result.push(toQueryResult(pr, 'authored'));
+					}
+
+					// It seems like GitLab doesn't give us mentioned PRs.
+					// if (???) {
+					// 	return toQueryResult(pr, 'mentioned');
+					// }
+
+					return result;
+				}),
+			],
+			r => r.pullRequest.url,
+		);
+
+		return results;
 	}
 
 	protected override searchProviderMyIssues(
@@ -169,12 +255,61 @@ abstract class GitLabIntegrationBase<ID extends SupportedIntegrationIds> extends
 
 	protected override async mergeProviderPullRequest(
 		_session: AuthenticationSession,
-		_pr: PullRequest | { id: string; headRefSha: string },
-		_options?: {
+		pr: PullRequest,
+		options?: {
 			mergeMethod?: PullRequestMergeMethod;
 		},
 	): Promise<boolean> {
-		return Promise.resolve(false);
+		if (!this.isPullRequest(pr)) return false;
+		const api = await this.getProvidersApi();
+		try {
+			const res = await api.mergePullRequest(this.id, pr, options);
+			return res;
+		} catch (ex) {
+			void this.showMergeErrorMessage(ex);
+			return false;
+		}
+	}
+
+	private async showMergeErrorMessage(ex: Error) {
+		// Unfortunately, providers-api does not let us know the exact reason for the error,
+		// so we show the same message to everything.
+		// When we update the library, we can improve the error handling here.
+		const confirm = 'Reauthenticate';
+		const result = await window.showErrorMessage(
+			`${ex.message}. Would you like to try reauthenticating to provide additional access? Your token needs to have the 'api' scope to perform merge.`,
+			confirm,
+		);
+
+		if (result === confirm) {
+			await this.reauthenticate();
+		}
+	}
+
+	private isPullRequest(pr: PullRequest | { id: string; headRefSha: string }): pr is PullRequest {
+		return (pr as PullRequest).refs != null;
+	}
+
+	protected override async getProviderCurrentAccount({
+		accessToken,
+	}: AuthenticationSession): Promise<Account | undefined> {
+		const api = await this.getProvidersApi();
+		const currentUser = await api.getCurrentUser(this.id, { accessToken: accessToken });
+		if (currentUser == null) return undefined;
+
+		return {
+			provider: {
+				id: this.id,
+				name: this.name,
+				domain: this.domain,
+				icon: this.icon,
+			},
+			id: currentUser.id,
+			name: currentUser.name || undefined,
+			email: currentUser.email || undefined,
+			avatarUrl: currentUser.avatarUrl || undefined,
+			username: currentUser.username || undefined,
+		};
 	}
 }
 

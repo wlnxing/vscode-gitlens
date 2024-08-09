@@ -266,7 +266,7 @@ export class FocusIndicator implements Disposable {
 			case 'disconnected':
 				this.clearRefreshTimer();
 				tooltip.appendMarkdown(
-					`\n\n---\n\n[Connect to GitHub](command:gitlens.launchpad.indicator.action?%22connectGitHub%22 "Connect to GitHub") to get started.`,
+					`\n\n---\n\n[Connect an integration](command:gitlens.showLaunchpad?%7B%22source%22%3A%22launchpad-indicator%22%7D "Connect an integration") to get started.`,
 				);
 
 				this._statusBarFocus.text = `$(rocket)$(gitlens-unplug) Launchpad`;
@@ -567,18 +567,7 @@ export class FocusIndicator implements Disposable {
 						const github = await this.container.integrations?.get(HostingIntegrationId.GitHub);
 						if (github == null) break;
 						if (!(github.maybeConnected ?? (await github.isConnected()))) {
-							// TODO: Add back in once we switch GitHub to use the cloud
-							/* await this.container.integrations.manageCloudIntegrations(
-								{ integrationId: HostingIntegrationId.GitHub },
-								{
-									source: 'launchpad-indicator',
-									detail: {
-										action: 'connect',
-										integration: HostingIntegrationId.GitHub,
-									},
-								},
-							); */
-							void github.connect();
+							void github.connect('launchpad-indicator');
 						}
 						break;
 					}

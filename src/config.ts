@@ -82,6 +82,9 @@ export interface Config {
 		readonly generateCommitMessagePrompt: string;
 		readonly generateCloudPatchMessagePrompt: string;
 		readonly generateCodeSuggestionMessagePrompt: string;
+		readonly cloudIntegrations: {
+			readonly enabled: boolean;
+		};
 	};
 	readonly fileAnnotations: {
 		readonly preserveWhileEditing: boolean;
@@ -107,7 +110,6 @@ export interface Config {
 		};
 		readonly experimental: {
 			readonly queryLimit: number;
-			readonly queryUseInvolvesFilter: boolean;
 		};
 	};
 	readonly gitCommands: {
@@ -305,6 +307,7 @@ export type DateSource = 'authored' | 'committed';
 export type DateStyle = 'absolute' | 'relative';
 export type FileAnnotationType = 'blame' | 'changes' | 'heatmap';
 export type GitCommandSorting = 'name' | 'usage';
+export type GraphBranchesVisibility = 'all' | 'smart' | 'current';
 export type GraphScrollMarkersAdditionalTypes =
 	| 'localBranches'
 	| 'remoteBranches'
@@ -383,6 +386,7 @@ export interface AdvancedConfig {
 export interface GraphConfig {
 	readonly allowMultiple: boolean;
 	readonly avatars: boolean;
+	readonly branchesVisibility: GraphBranchesVisibility;
 	readonly commitOrdering: 'date' | 'author-date' | 'topo';
 	readonly dateFormat: DateTimeFormat | string | null;
 	readonly dateStyle: DateStyle | null;
@@ -628,6 +632,7 @@ interface ViewsConfigs {
 	readonly contributors: ContributorsViewConfig;
 	readonly drafts: DraftsViewConfig;
 	readonly fileHistory: FileHistoryViewConfig;
+	readonly launchpad: LaunchpadViewConfig;
 	readonly lineHistory: LineHistoryViewConfig;
 	readonly patchDetails: PatchDetailsViewConfig;
 	readonly pullRequest: PullRequestViewConfig;
@@ -728,6 +733,17 @@ export interface DraftsViewConfig {
 }
 
 export interface FileHistoryViewConfig {
+	readonly avatars: boolean;
+	readonly files: ViewsFilesConfig;
+	readonly pullRequests: {
+		readonly enabled: boolean;
+		readonly showForCommits: boolean;
+	};
+}
+
+export interface LaunchpadViewConfig {
+	readonly enabled: boolean;
+
 	readonly avatars: boolean;
 	readonly files: ViewsFilesConfig;
 	readonly pullRequests: {

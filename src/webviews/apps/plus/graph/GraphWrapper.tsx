@@ -13,11 +13,13 @@ import type {
 	OnFormatCommitDateTime,
 } from '@gitkraken/gitkraken-components';
 import GraphContainer, { CommitDateTimeSources, refZone } from '@gitkraken/gitkraken-components';
+import type { SlChangeEvent } from '@shoelace-style/shoelace';
+import { SlOption, SlSelect } from '@shoelace-style/shoelace/dist/react';
 import { VSCodeCheckbox, VSCodeRadio, VSCodeRadioGroup } from '@vscode/webview-ui-toolkit/react';
-import type { FormEvent, ReactElement } from 'react';
+import type { FormEvent, MouseEvent, ReactElement } from 'react';
 import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { getPlatform } from '@env/platform';
-import type { DateStyle } from '../../../../config';
+import type { DateStyle, GraphBranchesVisibility } from '../../../../config';
 import type { SearchQuery } from '../../../../git/search';
 import type { FocusCommandArgs } from '../../../../plus/focus/focus';
 import type { Subscription } from '../../../../plus/gk/account/subscription';
@@ -45,6 +47,7 @@ import type {
 } from '../../../../plus/webviews/graph/protocol';
 import {
 	DidChangeAvatarsNotification,
+	DidChangeBranchStateNotification,
 	DidChangeColumnsNotification,
 	DidChangeGraphConfigurationNotification,
 	DidChangeRefsMetadataNotification,
@@ -62,6 +65,8 @@ import { pluralize } from '../../../../system/string';
 import { createWebviewCommandLink } from '../../../../system/webview';
 import type { IpcNotification } from '../../../protocol';
 import { DidChangeHostWindowFocusNotification } from '../../../protocol';
+import { GlButton } from '../../shared/components/button.react';
+import { CodeIcon } from '../../shared/components/code-icon.react';
 import { MenuDivider, MenuItem, MenuLabel, MenuList } from '../../shared/components/menu/react';
 import { PopMenu } from '../../shared/components/overlays/pop-menu/react';
 import { GlPopover } from '../../shared/components/overlays/popover.react';
@@ -81,27 +86,28 @@ export interface GraphWrapperProps {
 	nonce?: string;
 	state: State;
 	subscriber: (callback: UpdateStateCallback) => () => void;
+	onChangeColumns?: (colsSettings: GraphColumnsConfig) => void;
+	onChangeExcludeTypes?: (key: keyof GraphExcludeTypes, value: boolean) => void;
+	onChangeGraphConfiguration?: (changes: UpdateGraphConfigurationParams['changes']) => void;
+	onChangeRefIncludes?: (branchesVisibility: GraphBranchesVisibility, refs?: GraphRefOptData[]) => void;
+	onChangeRefsVisibility?: (refs: GraphExcludedRef[], visible: boolean) => void;
+	onChangeSelection?: (rows: GraphRow[]) => void;
 	onChooseRepository?: () => void;
-	onColumnsChange?: (colsSettings: GraphColumnsConfig) => void;
 	onDoubleClickRef?: (ref: GraphRef, metadata?: GraphRefMetadataItem) => void;
 	onDoubleClickRow?: (row: GraphRow, preserveFocus?: boolean) => void;
-	onHoverRowPromise?: (row: GraphRow) => Promise<DidGetRowHoverParams | undefined>;
+	onEnsureRowPromise?: (id: string, select: boolean) => Promise<DidEnsureRowParams | undefined>;
+	onHoverRowPromise?: (row: GraphRow) => Promise<DidGetRowHoverParams>;
+	onJumpToRefPromise?: (alt: boolean) => Promise<{ name: string; sha: string } | undefined>;
 	onMissingAvatars?: (emails: Record<string, string>) => void;
 	onMissingRefsMetadata?: (metadata: GraphMissingRefsMetadata) => void;
 	onMoreRows?: (id?: string) => void;
 	onOpenPullRequest?: (pr: NonNullable<NonNullable<State['branchState']>['pr']>) => void;
-	onRefsVisibilityChange?: (refs: GraphExcludedRef[], visible: boolean) => void;
 	onSearch?: (search: SearchQuery | undefined, options?: { limit?: number }) => void;
 	onSearchPromise?: (
 		search: SearchQuery,
 		options?: { limit?: number; more?: boolean },
 	) => Promise<DidSearchParams | undefined>;
 	onSearchOpenInView?: (search: SearchQuery) => void;
-	onSelectionChange?: (rows: GraphRow[]) => void;
-	onEnsureRowPromise?: (id: string, select: boolean) => Promise<DidEnsureRowParams | undefined>;
-	onExcludeType?: (key: keyof GraphExcludeTypes, value: boolean) => void;
-	onIncludeOnlyRef?: (all: boolean) => void;
-	onUpdateGraphConfiguration?: (changes: UpdateGraphConfigurationParams['changes']) => void;
 }
 
 const getGraphDateFormatter = (config?: GraphComponentConfig): OnFormatCommitDateTime => {
@@ -205,23 +211,24 @@ export function GraphWrapper({
 	nonce,
 	state,
 	onChooseRepository,
-	onColumnsChange,
+	onChangeColumns,
+	onChangeExcludeTypes,
+	onChangeGraphConfiguration,
+	onChangeRefIncludes,
+	onChangeRefsVisibility,
+	onChangeSelection,
 	onDoubleClickRef,
 	onDoubleClickRow,
 	onEnsureRowPromise,
 	onHoverRowPromise,
+	onJumpToRefPromise,
 	onMissingAvatars,
 	onMissingRefsMetadata,
 	onMoreRows,
 	onOpenPullRequest,
-	onRefsVisibilityChange,
 	onSearch,
 	onSearchPromise,
 	onSearchOpenInView,
-	onSelectionChange,
-	onExcludeType,
-	onIncludeOnlyRef,
-	onUpdateGraphConfiguration,
 }: GraphWrapperProps) {
 	const graphRef = useRef<GraphContainer>(null);
 
@@ -235,6 +242,7 @@ export function GraphWrapper({
 	const [repo, setRepo] = useState<GraphRepository | undefined>(
 		repos.find(item => item.path === state.selectedRepository),
 	);
+	const [branchesVisibility, setBranchesVisibility] = useState(state.branchesVisibility);
 	const [branchState, setBranchState] = useState(state.branchState);
 	const [selectedRows, setSelectedRows] = useState(state.selectedRows);
 	const [activeRow, setActiveRow] = useState(state.activeRow);
@@ -294,6 +302,9 @@ export function GraphWrapper({
 			case DidChangeAvatarsNotification:
 				setAvatars(state.avatars);
 				break;
+			case DidChangeBranchStateNotification:
+				setBranchState(state.branchState);
+				break;
 			case DidChangeHostWindowFocusNotification:
 				setWindowFocused(state.windowFocused);
 				break;
@@ -335,9 +346,17 @@ export function GraphWrapper({
 				setSelectedRows(state.selectedRows);
 				break;
 			case DidChangeRefsVisibilityNotification:
+				setBranchesVisibility(state.branchesVisibility);
 				setExcludeRefsById(state.excludeRefs);
 				setExcludeTypes(state.excludeTypes);
 				setIncludeOnlyRefsById(state.includeOnlyRefs);
+				// Hack to force the Graph to maintain the selected rows
+				if (state.selectedRows != null) {
+					const shas = Object.keys(state.selectedRows);
+					if (shas.length) {
+						queueMicrotask(() => graphRef?.current?.selectCommits(shas, false, true));
+					}
+				}
 				break;
 			case DidChangeSubscriptionNotification:
 				setAllowed(state.allowed ?? false);
@@ -370,6 +389,7 @@ export function GraphWrapper({
 				setContext(state.context);
 				setAvatars(state.avatars ?? {});
 				setDownstreams(state.downstreams ?? {});
+				setBranchesVisibility(state.branchesVisibility);
 				setBranchState(state.branchState);
 				setRefsMetadata(state.refsMetadata);
 				setPagingHasMore(state.paging?.hasMore ?? false);
@@ -431,7 +451,7 @@ export function GraphWrapper({
 	};
 
 	const handleOnMinimapToggle = (_e: React.MouseEvent) => {
-		onUpdateGraphConfiguration?.({ minimap: !graphConfig?.minimap });
+		onChangeGraphConfiguration?.({ minimap: !graphConfig?.minimap });
 	};
 
 	// This can only be applied to one radio button for now due to a bug in the component: https://github.com/microsoft/fast/issues/6381
@@ -444,7 +464,7 @@ export function GraphWrapper({
 			if (graphConfig.minimapDataType === minimapDataType) return;
 
 			setGraphConfig({ ...graphConfig, minimapDataType: minimapDataType });
-			onUpdateGraphConfiguration?.({ minimapDataType: minimapDataType });
+			onChangeGraphConfiguration?.({ minimapDataType: minimapDataType });
 		}
 	};
 
@@ -458,7 +478,7 @@ export function GraphWrapper({
 			if (!graphConfig.minimapMarkerTypes.includes(value)) {
 				const minimapMarkerTypes = [...graphConfig.minimapMarkerTypes, value];
 				setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
-				onUpdateGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
+				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
 			}
 		} else {
 			const index = graphConfig.minimapMarkerTypes.indexOf(value);
@@ -466,13 +486,28 @@ export function GraphWrapper({
 				const minimapMarkerTypes = [...graphConfig.minimapMarkerTypes];
 				minimapMarkerTypes.splice(index, 1);
 				setGraphConfig({ ...graphConfig, minimapMarkerTypes: minimapMarkerTypes });
-				onUpdateGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
+				onChangeGraphConfiguration?.({ minimapMarkerTypes: minimapMarkerTypes });
 			}
 		}
 	};
 
+	const stopColumnResize = () => {
+		const activeResizeElement = document.querySelector('.graph-header .resizable.resizing');
+		if (!activeResizeElement) return;
+
+		// Trigger a mouseup event to reset the column resize state
+		document.dispatchEvent(
+			new MouseEvent('mouseup', {
+				view: window,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	};
+
 	const handleOnGraphMouseLeave = (_event: React.MouseEvent<any>) => {
 		minimap.current?.unselect(undefined, true);
+		stopColumnResize();
 	};
 
 	const handleOnGraphRowHovered = (
@@ -545,23 +580,12 @@ export function GraphWrapper({
 		return searchIndex < 1 ? 1 : searchIndex + 1;
 	}, [activeRow, searchResults]);
 
-	const isAllBranches = useMemo(() => {
-		if (includeOnlyRefsById == null) {
-			return true;
-		}
-		return Object.keys(includeOnlyRefsById).length === 0;
-	}, [includeOnlyRefsById]);
-
 	const hasFilters = useMemo(() => {
-		if (!isAllBranches || graphConfig?.onlyFollowFirstParent) return true;
+		if (graphConfig?.onlyFollowFirstParent) return true;
 		if (excludeTypes == null) return false;
 
 		return Object.values(excludeTypes).includes(true);
-	}, [excludeTypes, isAllBranches, graphConfig?.onlyFollowFirstParent]);
-
-	const hasSpecialFilters = useMemo(() => {
-		return !isAllBranches;
-	}, [isAllBranches]);
+	}, [excludeTypes, graphConfig?.onlyFollowFirstParent]);
 
 	const handleSearchInput = (e: CustomEvent<SearchQuery>) => {
 		const detail = e.detail;
@@ -702,51 +726,50 @@ export function GraphWrapper({
 		onChooseRepository?.();
 	};
 
-	const handleFilterChange = (e: Event | FormEvent<HTMLElement>) => {
-		const $el = e.target as HTMLInputElement;
+	const handleJumpToRef = async (e: MouseEvent) => {
+		const ref = await onJumpToRefPromise?.(e.altKey);
+		if (ref != null) {
+			const sha = await ensureSearchResultRow(ref.sha);
+			if (sha == null) return;
 
-		const value = $el.value;
-		const isChecked = $el.checked;
-
-		switch (value) {
-			case 'mergeCommits':
-				onUpdateGraphConfiguration?.({ dimMergeCommits: isChecked });
-				return;
-
-			case 'onlyFollowFirstParent':
-				onUpdateGraphConfiguration?.({ onlyFollowFirstParent: isChecked });
-				return;
-		}
-
-		const isLocalBranches = ['branch-all', 'branch-current'].includes(value);
-		if (
-			!isLocalBranches &&
-			!['remotes', 'stashes', 'tags', 'mergeCommits', 'onlyFollowFirstParent'].includes(value)
-		) {
-			return;
-		}
-
-		const key = value as keyof GraphExcludeTypes;
-		const currentFilter = excludeTypes?.[key];
-		if ((currentFilter == null && isChecked) || (currentFilter != null && currentFilter !== isChecked)) {
-			setExcludeTypes({
-				...excludeTypes,
-				[key]: isChecked,
-			});
-			onExcludeType?.(key, isChecked);
+			queueMicrotask(() => graphRef.current?.selectCommits([sha], false, true));
 		}
 	};
 
-	// This can only be applied to one radio button for now due to a bug in the component: https://github.com/microsoft/fast/issues/6381
-	const handleLocalBranchFiltering = (e: Event | FormEvent<HTMLElement>) => {
+	const handleFilterChange = (e: Event | FormEvent<HTMLElement>) => {
 		const $el = e.target as HTMLInputElement;
-		const value = $el.value;
-		const isChecked = $el.checked;
-		const wantsAllBranches = value === 'branch-all' && isChecked;
-		if (isAllBranches === wantsAllBranches) {
-			return;
+		if ($el == null) return;
+
+		const { checked } = $el;
+
+		switch ($el.value) {
+			case 'mergeCommits':
+				onChangeGraphConfiguration?.({ dimMergeCommits: checked });
+				break;
+
+			case 'onlyFollowFirstParent':
+				onChangeGraphConfiguration?.({ onlyFollowFirstParent: checked });
+				break;
+
+			case 'remotes':
+			case 'stashes':
+			case 'tags': {
+				const key = $el.value satisfies keyof GraphExcludeTypes;
+				const currentFilter = excludeTypes?.[key];
+				if ((currentFilter == null && checked) || (currentFilter != null && currentFilter !== checked)) {
+					setExcludeTypes({ ...excludeTypes, [key]: checked });
+					onChangeExcludeTypes?.(key, checked);
+				}
+				break;
+			}
 		}
-		onIncludeOnlyRef?.(wantsAllBranches);
+	};
+
+	const handleBranchesVisibility = (e: SlChangeEvent): void => {
+		const $el = e.target as HTMLSelectElement;
+		if ($el == null) return;
+
+		onChangeRefIncludes?.($el.value as GraphBranchesVisibility);
 	};
 
 	const handleMissingAvatars = (emails: GraphAvatars) => {
@@ -775,7 +798,7 @@ export function GraphWrapper({
 
 	const handleOnColumnResized = (columnName: GraphColumnName, columnSettings: GraphColumnSetting) => {
 		if (columnSettings.width) {
-			onColumnsChange?.({
+			onChangeColumns?.({
 				[columnName]: {
 					width: columnSettings.width,
 					isHidden: columnSettings.isHidden,
@@ -798,11 +821,11 @@ export function GraphWrapper({
 		for (const [columnName, config] of Object.entries(columnsSettings as GraphColumnsConfig)) {
 			graphColumnsConfig[columnName] = { ...config };
 		}
-		onColumnsChange?.(graphColumnsConfig);
+		onChangeColumns?.(graphColumnsConfig);
 	};
 
 	const handleOnToggleRefsVisibilityClick = (_event: any, refs: GraphRefOptData[], visible: boolean) => {
-		onRefsVisibilityChange?.(refs, visible);
+		onChangeRefsVisibility?.(refs, visible);
 	};
 
 	const handleOnDoubleClickRef = (
@@ -943,6 +966,8 @@ export function GraphWrapper({
 	};
 
 	const handleSelectGraphRows = (rows: GraphRow[]) => {
+		hover.current?.hide();
+
 		const active = rows[rows.length - 1];
 		const activeKey = active != null ? `${active.sha}|${active.date}` : undefined;
 		// HACK: Ensure the main state is updated since it doesn't come from the extension
@@ -951,7 +976,7 @@ export function GraphWrapper({
 		setActiveDay(active?.date);
 		computeSelectionContext(active, rows);
 
-		onSelectionChange?.(rows);
+		onChangeSelection?.(rows);
 	};
 
 	const renderFetchAction = () => {
@@ -1202,6 +1227,14 @@ export function GraphWrapper({
 										</span>
 									</div>
 								</GlPopover>
+								<GlButton appearance="toolbar" onClick={handleJumpToRef}>
+									<CodeIcon icon="target"></CodeIcon>
+									<span slot="tooltip">
+										Jump to HEAD
+										<br />
+										[Alt] Jump to Reference...
+									</span>
+								</GlButton>
 								<span>
 									<span className="codicon codicon-chevron-right"></span>
 								</span>
@@ -1238,45 +1271,62 @@ export function GraphWrapper({
 				{allowed && (
 					<div className="titlebar__row">
 						<div className="titlebar__group">
+							<GlTooltip placement="top" content="Branches Visibility">
+								<SlSelect value={branchesVisibility} onSlChange={handleBranchesVisibility} hoist>
+									<CodeIcon icon="chevron-down" slot="expand-icon"></CodeIcon>
+									<SlOption value="all" disabled={repo?.isVirtual}>
+										All Branches
+									</SlOption>
+									<SlOption value="smart" disabled={repo?.isVirtual}>
+										Smart Branches
+										{!repo?.isVirtual ? (
+											<GlTooltip placement="right" slot="suffix">
+												<CodeIcon icon="info"></CodeIcon>
+												<span slot="content">
+													Shows only relevant branches
+													<br />
+													<br />
+													<i>Includes the current branch, its upstream, and its base</i>
+												</span>
+											</GlTooltip>
+										) : (
+											<CodeIcon icon="info" slot="suffix"></CodeIcon>
+										)}
+									</SlOption>
+									<SlOption value="current">Current Branch</SlOption>
+								</SlSelect>
+							</GlTooltip>
+							<span>
+								<span className="action-divider"></span>
+							</span>
 							<GlTooltip placement="top">
 								<PopMenu>
 									<button type="button" className="action-button" slot="trigger">
 										<span className={`codicon codicon-filter${hasFilters ? '-filled' : ''}`}></span>
-										{hasSpecialFilters && <span className="action-button__indicator"></span>}
 										<span
 											className="codicon codicon-chevron-down action-button__more"
 											aria-hidden="true"
 										></span>
 									</button>
 									<MenuList slot="content">
-										<MenuLabel>Filter options</MenuLabel>
-										<MenuItem role="none">
-											<VSCodeRadioGroup
-												orientation="vertical"
-												value={
-													isAllBranches && repo?.isVirtual !== true
-														? 'branch-all'
-														: 'branch-current'
-												}
-												readOnly={repo?.isVirtual === true}
-											>
-												{repo?.isVirtual !== true && (
-													<VSCodeRadio
-														name="branching-toggle"
-														value="branch-all"
-														onChange={handleLocalBranchFiltering}
-													>
-														Show All Branches
-													</VSCodeRadio>
-												)}
-												<VSCodeRadio name="branching-toggle" value="branch-current">
-													Show Current Branch Only
-												</VSCodeRadio>
-											</VSCodeRadioGroup>
-										</MenuItem>
-										<MenuDivider></MenuDivider>
+										<MenuLabel>Graph Filters</MenuLabel>
 										{repo?.isVirtual !== true && (
 											<>
+												<MenuItem role="none">
+													<GlTooltip
+														placement="right"
+														content="Only follow the first parent of merge commits to provide a more linear history"
+													>
+														<VSCodeCheckbox
+															value="onlyFollowFirstParent"
+															onChange={handleFilterChange}
+															defaultChecked={graphConfig?.onlyFollowFirstParent ?? false}
+														>
+															Simplify Merge History
+														</VSCodeCheckbox>
+													</GlTooltip>
+												</MenuItem>
+												<MenuDivider></MenuDivider>
 												<MenuItem role="none">
 													<VSCodeCheckbox
 														value="remotes"
@@ -1307,22 +1357,6 @@ export function GraphWrapper({
 											</VSCodeCheckbox>
 										</MenuItem>
 										<MenuDivider></MenuDivider>
-										{repo?.isVirtual !== true && (
-											<MenuItem role="none">
-												<GlTooltip
-													placement="right"
-													content="Only follow the first parent of merge commits to provide a more linear history"
-												>
-													<VSCodeCheckbox
-														value="onlyFollowFirstParent"
-														onChange={handleFilterChange}
-														defaultChecked={graphConfig?.onlyFollowFirstParent ?? false}
-													>
-														Simplify Merge History
-													</VSCodeCheckbox>
-												</GlTooltip>
-											</MenuItem>
-										)}
 										<MenuItem role="none">
 											<VSCodeCheckbox
 												value="mergeCommits"
@@ -1334,7 +1368,7 @@ export function GraphWrapper({
 										</MenuItem>
 									</MenuList>
 								</PopMenu>
-								<span slot="content">Filter Graph</span>
+								<span slot="content">Graph Filtering</span>
 							</GlTooltip>
 							<span>
 								<span className="action-divider"></span>
@@ -1386,7 +1420,7 @@ export function GraphWrapper({
 											></span>
 										</button>
 										<MenuList slot="content">
-											<MenuLabel>Chart</MenuLabel>
+											<MenuLabel>Minimap</MenuLabel>
 											<MenuItem role="none">
 												<VSCodeRadioGroup
 													orientation="vertical"
@@ -1505,9 +1539,7 @@ export function GraphWrapper({
 				visible={!allowed}
 			>
 				<p slot="feature">
-					<a href="https://help.gitkraken.com/gitlens/gitlens-features/#commit-graph-%e2%9c%a8">
-						Commit Graph
-					</a>
+					<a href="https://help.gitkraken.com/gitlens/gitlens-features/#commit-graph-pro">Commit Graph</a>
 					<GlFeatureBadge
 						source={{ source: 'graph', detail: 'badge' }}
 						subscription={subscription}
@@ -1530,13 +1562,7 @@ export function GraphWrapper({
 				visibleDays={visibleDays}
 				onSelected={e => handleOnMinimapDaySelected(e)}
 			></GlGraphMinimapContainer>
-			<GlGraphHover
-				ref={hover as any}
-				id="commit-hover"
-				distance={0}
-				skidding={15}
-				placement="bottom-start"
-			></GlGraphHover>
+			<GlGraphHover ref={hover as any} id="commit-hover" distance={0} skidding={15}></GlGraphHover>
 			<main id="main" className="graph-app__main" aria-hidden={!allowed}>
 				{repo !== undefined ? (
 					<>

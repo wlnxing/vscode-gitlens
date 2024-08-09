@@ -17,12 +17,13 @@ import {
 	ProviderRequestRateLimitError,
 } from '../../../../errors';
 import type { PagedResult, RepositoryVisibility } from '../../../../git/gitProvider';
-import type { Account } from '../../../../git/models/author';
+import type { Account, UnidentifiedAuthor } from '../../../../git/models/author';
 import type { DefaultBranch } from '../../../../git/models/defaultBranch';
 import type { IssueOrPullRequest, SearchedIssue } from '../../../../git/models/issue';
 import type { PullRequest, SearchedPullRequest } from '../../../../git/models/pullRequest';
 import { PullRequestMergeMethod } from '../../../../git/models/pullRequest';
-import { isSha } from '../../../../git/models/reference';
+import type { GitRevisionRange } from '../../../../git/models/reference';
+import { createRevisionRange, getRevisionRangeParts, isRevisionRange, isSha } from '../../../../git/models/reference';
 import type { Provider } from '../../../../git/models/remoteProvider';
 import type { RepositoryMetadata } from '../../../../git/models/repositoryMetadata';
 import type { GitUser } from '../../../../git/models/user';
@@ -261,10 +262,11 @@ export class GitHubApi implements Disposable {
 }`;
 
 			const rsp = await this.graphql<QueryResult>(provider, token, query, { ...options }, scope);
-			if (rsp?.viewer == null) return undefined;
+			if (rsp?.viewer?.login == null) return undefined;
 
 			return {
 				provider: provider,
+				id: rsp.viewer.login,
 				name: rsp.viewer.name ?? undefined,
 				email: rsp.viewer.email ?? undefined,
 				// If we are GitHub Enterprise, we may need to convert the avatar URL since it might require authentication
@@ -300,7 +302,7 @@ export class GitHubApi implements Disposable {
 			baseUrl?: string;
 			avatarSize?: number;
 		},
-	): Promise<Account | undefined> {
+	): Promise<Account | UnidentifiedAuthor | undefined> {
 		const scope = getLogScope();
 
 		interface QueryResult {
@@ -365,6 +367,15 @@ export class GitHubApi implements Disposable {
 
 			return {
 				provider: provider,
+				...(author?.user?.login != null
+					? {
+							id: author.user.login,
+							username: author.user.login,
+					  }
+					: {
+							id: undefined,
+							username: undefined,
+					  }),
 				name: author.name ?? undefined,
 				email: author.email ?? undefined,
 				// If we are GitHub Enterprise, we may need to convert the avatar URL since it might require authentication
@@ -380,7 +391,6 @@ export class GitHubApi implements Disposable {
 									options.avatarSize,
 						    )
 						  : undefined,
-				username: author.user?.login ?? undefined,
 			};
 		} catch (ex) {
 			if (ex instanceof ProviderRequestNotFoundError) return undefined;
@@ -451,10 +461,11 @@ export class GitHubApi implements Disposable {
 			);
 
 			const author = rsp?.search?.nodes?.[0];
-			if (author == null) return undefined;
+			if (author?.login == null) return undefined;
 
 			return {
 				provider: provider,
+				id: author.login,
 				name: author.name ?? undefined,
 				email: author.email ?? undefined,
 				// If we are GitHub Enterprise, we may need to convert the avatar URL since it might require authentication
@@ -1418,6 +1429,10 @@ export class GitHubApi implements Disposable {
 			return this.getCommitsCoreSingle(token, owner, repo, ref);
 		}
 
+		if (isRevisionRange(ref)) {
+			return this.getCommitsCoreRange(token, owner, repo, ref);
+		}
+
 		interface QueryResult {
 			viewer: { name: string };
 			repository:
@@ -1532,6 +1547,45 @@ export class GitHubApi implements Disposable {
 						: undefined,
 				values: history.nodes,
 				viewer: rsp?.viewer.name,
+			};
+		} catch (ex) {
+			if (ex instanceof ProviderRequestNotFoundError) return emptyPagedResult;
+
+			throw this.handleException(ex, undefined, scope);
+		}
+	}
+
+	private async getCommitsCoreRange(
+		token: string,
+		owner: string,
+		repo: string,
+		range: GitRevisionRange,
+	): Promise<PagedResult<GitHubCommit> & { viewer?: string }> {
+		const scope = getLogScope();
+
+		try {
+			const result = await this.getComparison(token, owner, repo, range);
+			if (result == null) return emptyPagedResult;
+
+			return {
+				values: result.commits
+					?.map<GitHubCommit>(r => ({
+						oid: r.sha,
+						parents: { nodes: r.parents.map(p => ({ oid: p.sha })) },
+						message: r.commit.message,
+						author: {
+							avatarUrl: r.author?.avatar_url ?? undefined,
+							date: r.commit.author?.date ?? r.commit.author?.date ?? new Date().toString(),
+							email: r.author?.email ?? r.commit.author?.email ?? undefined,
+							name: r.author?.name ?? r.commit.author?.name ?? '',
+						},
+						committer: {
+							date: r.commit.committer?.date ?? new Date().toString(),
+							email: r.committer?.email ?? r.commit.committer?.email ?? undefined,
+							name: r.committer?.name ?? r.commit.committer?.name ?? '',
+						},
+					}))
+					.reverse(),
 			};
 		} catch (ex) {
 			if (ex instanceof ProviderRequestNotFoundError) return emptyPagedResult;
@@ -1979,6 +2033,45 @@ export class GitHubApi implements Disposable {
 				username: rsp.viewer?.login,
 				id: rsp.viewer?.id,
 			};
+		} catch (ex) {
+			if (ex instanceof ProviderRequestNotFoundError) return undefined;
+
+			throw this.handleException(ex, undefined, scope);
+		}
+	}
+
+	@debug<GitHubApi['getComparison']>({ args: { 0: '<token>' } })
+	async getComparison(
+		token: string,
+		owner: string,
+		repo: string,
+		range: GitRevisionRange,
+	): Promise<Endpoints['GET /repos/{owner}/{repo}/compare/{basehead}']['response']['data'] | undefined> {
+		const scope = getLogScope();
+
+		if (!isRevisionRange(range, 'qualified-triple-dot')) {
+			// GitHub doesn't support the `..` range notation, so convert it to `...` since it will work for many of our usages
+			const parts = getRevisionRangeParts(range);
+			range = createRevisionRange(parts?.left || 'HEAD', parts?.right || 'HEAD', '...');
+		}
+
+		try {
+			const rsp = await this.request(
+				undefined,
+				token,
+				'GET /repos/{owner}/{repo}/compare/{basehead}',
+				{
+					owner: owner,
+					repo: repo,
+					basehead: range,
+				},
+				scope,
+			);
+
+			const result = rsp?.data;
+			if (result == null) return undefined;
+
+			return result;
 		} catch (ex) {
 			if (ex instanceof ProviderRequestNotFoundError) return undefined;
 
@@ -2629,11 +2722,16 @@ export class GitHubApi implements Disposable {
 		}
 	}
 
-	private handleException(ex: Error, provider: Provider | undefined, scope: LogScope | undefined): Error {
+	private handleException(
+		ex: Error,
+		provider: Provider | undefined,
+		scope: LogScope | undefined,
+		silent?: boolean,
+	): Error {
 		Logger.error(ex, scope);
 		// debugger;
 
-		if (ex instanceof AuthenticationError) {
+		if (ex instanceof AuthenticationError && !silent) {
 			void this.showAuthenticationErrorMessage(ex, provider);
 		}
 		return ex;
@@ -2706,126 +2804,14 @@ export class GitHubApi implements Disposable {
 	async searchMyPullRequests(
 		provider: Provider,
 		token: string,
-		options?: { search?: string; user?: string; repos?: string[]; baseUrl?: string; avatarSize?: number },
-		cancellation?: CancellationToken,
-	): Promise<SearchedPullRequest[]> {
-		const scope = getLogScope();
-
-		if (configuration.get('launchpad.experimental.queryUseInvolvesFilter') ?? false) {
-			return this.searchMyInvolvedPullRequests(provider, token, options, cancellation);
-		}
-
-		const limit = Math.min(100, configuration.get('launchpad.experimental.queryLimit') ?? 100);
-
-		interface SearchResult {
-			authored: {
-				nodes: GitHubPullRequest[];
-			};
-			assigned: {
-				nodes: GitHubPullRequest[];
-			};
-			reviewRequested: {
-				nodes: GitHubPullRequest[];
-			};
-			mentioned: {
-				nodes: GitHubPullRequest[];
-			};
-		}
-
-		try {
-			const query = `query searchMyPullRequests(
-	$authored: String!
-	$assigned: String!
-	$reviewRequested: String!
-	$mentioned: String!
-	$avatarSize: Int
-) {
-	authored: search(first: ${limit}, query: $authored, type: ISSUE) {
-		nodes {
-			...on PullRequest {
-				${gqlPullRequestFragment}
-			}
-		}
-	}
-	assigned: search(first: ${limit}, query: $assigned, type: ISSUE) {
-		nodes {
-			...on PullRequest {
-				${gqlPullRequestFragment}
-			}
-		}
-	}
-	reviewRequested: search(first: ${limit}, query: $reviewRequested, type: ISSUE) {
-		nodes {
-			...on PullRequest {
-				${gqlPullRequestFragment}
-			}
-		}
-	}
-	mentioned: search(first: ${limit}, query: $mentioned, type: ISSUE) {
-		nodes {
-			...on PullRequest {
-				${gqlPullRequestFragment}
-			}
-		}
-	}
-}`;
-
-			let search = options?.search?.trim() ?? '';
-
-			if (options?.user) {
-				search += ` user:${options.user}`;
-			}
-
-			if (options?.repos != null && options.repos.length > 0) {
-				const repo = '  repo:';
-				search += `${repo}${options.repos.join(repo)}`;
-			}
-
-			const baseFilters = 'is:pr is:open archived:false';
-			const rsp = await this.graphql<SearchResult>(
-				provider,
-				token,
-				query,
-				{
-					authored: `${search} ${baseFilters} author:@me`.trim(),
-					assigned: `${search} ${baseFilters} assignee:@me`.trim(),
-					reviewRequested: `${search} ${baseFilters} review-requested:@me`.trim(),
-					mentioned: `${search} ${baseFilters} mentions:@me`.trim(),
-					baseUrl: options?.baseUrl,
-					avatarSize: options?.avatarSize,
-				},
-				scope,
-				cancellation,
-			);
-			if (rsp == null) return [];
-
-			function toQueryResult(pr: GitHubPullRequest, reason?: string): SearchedPullRequest {
-				return {
-					pullRequest: fromGitHubPullRequest(pr, provider),
-					reasons: reason ? [reason] : [],
-				};
-			}
-
-			const results: SearchedPullRequest[] = uniqueWithReasons(
-				[
-					...rsp.assigned.nodes.map(pr => toQueryResult(pr, 'assigned')),
-					...rsp.reviewRequested.nodes.map(pr => toQueryResult(pr, 'review-requested')),
-					...rsp.mentioned.nodes.map(pr => toQueryResult(pr, 'mentioned')),
-					...rsp.authored.nodes.map(pr => toQueryResult(pr, 'authored')),
-				],
-				r => r.pullRequest.url,
-			);
-			return results;
-		} catch (ex) {
-			throw this.handleException(ex, provider, scope);
-		}
-	}
-
-	@debug<GitHubApi['searchMyInvolvedPullRequests']>({ args: { 0: p => p.name, 1: '<token>' } })
-	private async searchMyInvolvedPullRequests(
-		provider: Provider,
-		token: string,
-		options?: { search?: string; user?: string; repos?: string[]; baseUrl?: string; avatarSize?: number },
+		options?: {
+			search?: string;
+			user?: string;
+			repos?: string[];
+			baseUrl?: string;
+			avatarSize?: number;
+			silent?: boolean;
+		},
 		cancellation?: CancellationToken,
 	): Promise<SearchedPullRequest[]> {
 		const scope = getLogScope();
@@ -2922,7 +2908,7 @@ export class GitHubApi implements Disposable {
 			const results: SearchedPullRequest[] = rsp.search.nodes.map(pr => toQueryResult(pr));
 			return results;
 		} catch (ex) {
-			throw this.handleException(ex, provider, scope);
+			throw this.handleException(ex, provider, scope, options?.silent);
 		}
 	}
 

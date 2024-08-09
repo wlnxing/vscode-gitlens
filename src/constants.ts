@@ -3,7 +3,7 @@ import type { GeminiModels } from './ai/geminiProvider';
 import type { OpenAIModels } from './ai/openaiProvider';
 import type { VSCodeAIModels } from './ai/vscodeProvider';
 import type { AnnotationStatus } from './annotations/annotationProvider';
-import type { FileAnnotationType, ViewShowBranchComparison } from './config';
+import type { GraphBranchesVisibility, ViewShowBranchComparison } from './config';
 import type { Environment } from './container';
 import type { StoredSearchQuery } from './git/search';
 import type { Subscription, SubscriptionPlanId, SubscriptionState } from './plus/gk/account/subscription';
@@ -16,6 +16,7 @@ import type { TrackedUsage, TrackedUsageKeys } from './telemetry/usageTracker';
 export const extensionPrefix = 'gitlens';
 export const quickPickTitleMaxChars = 80;
 
+export const experimentalBadge = 'ᴇxᴘᴇʀɪᴍᴇɴᴛᴀʟ';
 export const previewBadge = 'ᴘʀᴇᴠɪᴇᴡ';
 export const proBadge = 'ᴘʀᴏ';
 export const proBadgeSuperscript = 'ᴾᴿᴼ';
@@ -180,6 +181,7 @@ export const enum Commands {
 	CopyShaToClipboard = 'gitlens.copyShaToClipboard',
 	CopyRelativePathToClipboard = 'gitlens.copyRelativePathToClipboard',
 	ApplyPatchFromClipboard = 'gitlens.applyPatchFromClipboard',
+	PastePatchFromClipboard = 'gitlens.pastePatchFromClipboard',
 	CopyPatchToClipboard = 'gitlens.copyPatchToClipboard',
 	CopyWorkingChangesToWorktree = 'gitlens.copyWorkingChangesToWorktree',
 	CreatePatch = 'gitlens.createPatch',
@@ -400,6 +402,10 @@ export const enum Commands {
 	Deprecated_ShowFileHistoryInView = 'gitlens.showFileHistoryInView',
 }
 
+export type GitConfigKeys =
+	| `branch.${string}.${'gk' | 'vscode'}-merge-base`
+	| `branch.${string}.github-pr-owner-number`;
+
 export type TreeViewCommands = `gitlens.views.${
 	| `branches.${
 			| 'copy'
@@ -437,6 +443,12 @@ export type TreeViewCommands = `gitlens.views.${
 			| `setShowAllBranches${'On' | 'Off'}`
 			| `setShowMergeCommits${'On' | 'Off'}`
 			| `setShowAvatars${'On' | 'Off'}`}`
+	| `launchpad.${
+			| 'copy'
+			| 'info'
+			| 'refresh'
+			| `setFilesLayoutTo${'Auto' | 'List' | 'Tree'}`
+			| `setShowAvatars${'On' | 'Off'}`}`
 	| `lineHistory.${
 			| 'copy'
 			| 'refresh'
@@ -444,9 +456,9 @@ export type TreeViewCommands = `gitlens.views.${
 			| `setEditorFollowing${'On' | 'Off'}`
 			| `setShowAvatars${'On' | 'Off'}`}`
 	| `pullRequest.${
+			| 'close'
 			| 'copy'
 			| 'refresh'
-			| 'close'
 			| `setFilesLayoutTo${'Auto' | 'List' | 'Tree'}`
 			| `setShowAvatars${'On' | 'Off'}`}`
 	| `remotes.${
@@ -540,6 +552,7 @@ export type TreeViewTypes =
 	| 'contributors'
 	| 'drafts'
 	| 'fileHistory'
+	| 'launchpad'
 	| 'lineHistory'
 	| 'pullRequest'
 	| 'remotes'
@@ -645,6 +658,8 @@ export type TreeViewNodeTypes =
 	| 'drafts'
 	| 'drafts-code-suggestions'
 	| 'grouping'
+	| 'launchpad'
+	| 'launchpad-item'
 	| 'merge-status'
 	| 'message'
 	| 'pager'
@@ -664,13 +679,11 @@ export type TreeViewNodeTypes =
 	| 'tracking-status-files'
 	| 'uncommitted-files'
 	| 'workspace-missing-repository'
-	| 'workspaces-view'
+	| 'workspaces'
 	| 'worktree'
 	| 'worktrees';
 
 export type ContextKeys = {
-	'gitlens:activeFileStatus': string;
-	'gitlens:annotationStatus': AnnotationStatus | `${AnnotationStatus}+${FileAnnotationType}`;
 	'gitlens:debugging': boolean;
 	'gitlens:disabled': boolean;
 	'gitlens:disabledToggleCodeLens': boolean;
@@ -680,6 +693,7 @@ export type ContextKeys = {
 	'gitlens:gk:organization:drafts:byob': boolean;
 	'gitlens:gk:organization:drafts:enabled': boolean;
 	'gitlens:hasVirtualFolders': boolean;
+	'gitlens:launchpad:connect': boolean;
 	'gitlens:plus': SubscriptionPlanId;
 	'gitlens:plus:disallowedRepos': string[];
 	'gitlens:plus:enabled': boolean;
@@ -690,6 +704,11 @@ export type ContextKeys = {
 	'gitlens:repos:withRemotes': string[];
 	'gitlens:repos:withHostingIntegrations': string[];
 	'gitlens:repos:withHostingIntegrationsConnected': string[];
+	'gitlens:schemes:trackable': string[];
+	'gitlens:tabs:annotated': string[];
+	'gitlens:tabs:annotated:computing': string[];
+	'gitlens:tabs:blameable': string[];
+	'gitlens:tabs:tracked': string[];
 	'gitlens:untrusted': boolean;
 	'gitlens:views:canCompare': boolean;
 	'gitlens:views:canCompare:file': boolean;
@@ -704,6 +723,7 @@ export type ContextKeys = {
 	'gitlens:views:pullRequest:visible': boolean;
 	'gitlens:views:repositories:autoRefresh': boolean;
 	'gitlens:vsls': boolean | 'host' | 'guest';
+	'gitlens:window:annotated': AnnotationStatus;
 } & Record<`gitlens:action:${string}`, number> &
 	Record<`gitlens:key:${Keys}`, boolean> &
 	Record<`gitlens:webview:${WebviewTypes | CustomEditorTypes}:visible`, boolean> &
@@ -824,11 +844,24 @@ export const enum Schemes {
 	GitLens = 'gitlens',
 	Output = 'output',
 	PRs = 'pr',
+	Remote = 'vscode-remote',
 	Terminal = 'vscode-terminal',
 	Vsls = 'vsls',
 	VslsScc = 'vsls-scc',
 	Virtual = 'vscode-vfs',
 }
+
+export const trackableSchemes = new Set<string>([
+	Schemes.File,
+	Schemes.Git,
+	Schemes.GitLens,
+	Schemes.PRs,
+	Schemes.Remote,
+	Schemes.Vsls,
+	Schemes.VslsScc,
+	Schemes.Virtual,
+	Schemes.GitHub,
+]);
 
 export type Sources =
 	| 'account'
@@ -844,6 +877,7 @@ export type Sources =
 	| 'integrations'
 	| 'launchpad'
 	| 'launchpad-indicator'
+	| 'launchpad-view'
 	| 'notification'
 	| 'patchDetails'
 	| 'prompt'
@@ -851,14 +885,26 @@ export type Sources =
 	| 'settings'
 	| 'timeline'
 	| 'trial-indicator'
+	| 'scm-input'
 	| 'subscription'
 	| 'walkthrough'
-	| 'welcome';
+	| 'welcome'
+	| 'worktrees';
+
+export type LoginContext = 'start_trial';
+
+export type ConnectIntegrationContext = 'launchpad';
+
+export type Context = LoginContext | ConnectIntegrationContext;
 
 export interface Source {
 	source: Sources;
 	detail?: string | TelemetryEventData;
 }
+
+export const sourceToContext: { [source in Sources]?: Context } = {
+	launchpad: 'launchpad',
+};
 
 export type AIProviders = 'anthropic' | 'gemini' | 'openai' | 'vscode';
 export type AIModels<Provider extends AIProviders = AIProviders> = Provider extends 'openai'
@@ -878,10 +924,13 @@ export type SupportedAIModels =
 	| 'vscode';
 
 export type SecretKeys =
-	| `gitlens.integration.auth:${IntegrationId}|${string}`
-	| `gitlens.integration.auth.cloud:${IntegrationId}|${string}`
+	| IntegrationAuthenticationKeys
 	| `gitlens.${AIProviders}.key`
 	| `gitlens.plus.auth:${Environment}`;
+
+export type IntegrationAuthenticationKeys =
+	| `gitlens.integration.auth:${IntegrationId}|${string}`
+	| `gitlens.integration.auth.cloud:${IntegrationId}|${string}`;
 
 export const enum SyncedStorageKeys {
 	Version = 'gitlens:synced:version',
@@ -951,8 +1000,6 @@ export type DeprecatedWorkspaceStorage = {
 	'confirm:sendToOpenAI': boolean;
 	/** @deprecated */
 	'graph:banners:dismissed': Record<string, boolean>;
-	/** @deprecated use `graph:filtersByRepo.excludeRefs` */
-	'graph:hiddenRefs': Record<string, StoredGraphExcludedRef>;
 	/** @deprecated */
 	'views:searchAndCompare:keepResults': boolean;
 };
@@ -1081,10 +1128,13 @@ export interface StoredGraphColumn {
 	width?: number;
 }
 
+export type StoredGraphExcludeTypes = 'remotes' | 'stashes' | 'tags';
+
 export interface StoredGraphFilters {
+	branchesVisibility?: GraphBranchesVisibility;
 	includeOnlyRefs?: Record<string, StoredGraphIncludeOnlyRef>;
 	excludeRefs?: Record<string, StoredGraphExcludedRef>;
-	excludeTypes?: Record<string, boolean>;
+	excludeTypes?: Record<StoredGraphExcludeTypes, boolean>;
 }
 
 export type StoredGraphRefType = 'head' | 'remote' | 'tag';
@@ -1205,6 +1255,15 @@ export type TelemetryEvents = {
 		'activation.mode': string | undefined;
 	} & Record<`config.${string}`, string | number | boolean | null>;
 
+	/** Sent when explaining changes from wip, commits, stashes, patches,etc. */
+	'ai/explain': {
+		type: 'change';
+		changeType: 'wip' | 'stash' | 'commit' | `draft-${'patch' | 'stash' | 'suggested_pr_change'}`;
+	} & AIEventBase;
+
+	/** Sent when generating summaries from commits, stashes, patches, etc. */
+	'ai/generate': (AIGenerateCommitEvent | AIGenerateDraftEvent) & AIEventBase;
+
 	/** Sent when a cloud-based hosting provider is connected */
 	'cloudIntegrations/hosting/connected': {
 		'hostingProvider.provider': IntegrationId;
@@ -1284,18 +1343,9 @@ export type TelemetryEvents = {
 	/** Sent when a VS Code command is executed by a GitLens provided action */
 	'command/core': { command: string };
 
-	/** Sent when explaining changes from  */
-	explainChanges: {
-		changeType: 'wip' | 'stash' | 'commit' | `draft-${'patch' | 'stash' | 'suggested_pr_change'}`;
-	};
-
-	generateDraftMessage: {
-		draftType: 'patch' | 'stash' | 'suggested_pr_change';
-	};
-
 	/** Sent when the user takes an action on a launchpad item */
 	'launchpad/title/action': LaunchpadEventData & {
-		action: 'feedback' | 'open-on-gkdev' | 'refresh' | 'settings';
+		action: 'feedback' | 'open-on-gkdev' | 'refresh' | 'settings' | 'connect';
 	};
 
 	/** Sent when the user takes an action on a launchpad item */
@@ -1475,6 +1525,27 @@ export type TelemetryEvents = {
 			| 'integrations'
 			| 'more';
 	};
+};
+
+type AIEventBase = {
+	'model.id': AIModels;
+	'model.provider.id': AIProviders;
+	'model.provider.name': string;
+	'retry.count': number;
+	duration?: number;
+	'input.length'?: number;
+	'output.length'?: number;
+	'failed.reason'?: 'user-declined' | 'user-cancelled' | 'error';
+	'failed.error'?: string;
+};
+
+export type AIGenerateCommitEvent = {
+	type: 'commitMessage';
+};
+
+export type AIGenerateDraftEvent = {
+	type: 'draftMessage';
+	draftType: 'patch' | 'stash' | 'suggested_pr_change';
 };
 
 export type LaunchpadTelemetryContext = LaunchpadEventData;

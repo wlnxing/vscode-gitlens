@@ -4,7 +4,7 @@ import { uuid } from '@env/crypto';
 import type { Response } from '@env/fetch';
 import type { TrackingContext } from '../../constants.telemetry';
 import type { Container } from '../../container';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
 import { debug } from '../../system/decorators/log';
 import type { DeferredEvent, DeferredEventExecutor } from '../../system/event';
 import { promisifyDeferred } from '../../system/event';
@@ -31,7 +31,7 @@ export class AuthenticationConnection implements Disposable {
 		private readonly connection: ServerConnection,
 	) {}
 
-	dispose() {}
+	dispose(): void {}
 
 	abort(): Promise<void> {
 		if (this._cancellationSource == null) return Promise.resolve();

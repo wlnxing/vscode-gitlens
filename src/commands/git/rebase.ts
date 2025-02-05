@@ -12,7 +12,7 @@ import type { DirectiveQuickPickItem } from '../../quickpicks/items/directive';
 import { createDirectiveQuickPickItem, Directive } from '../../quickpicks/items/directive';
 import type { FlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { createFlagsQuickPickItem } from '../../quickpicks/items/flags';
-import { getEditorCommand } from '../../system/-webview/utils';
+import { getEditorCommand } from '../../system/-webview/vscode';
 import { pluralize } from '../../system/string';
 import type { ViewsWithRepositoryFolders } from '../../views/viewBase';
 import type {
@@ -82,7 +82,7 @@ export class RebaseGitCommand extends QuickCommand<State> {
 		return false;
 	}
 
-	async execute(state: RebaseStepState) {
+	private async execute(state: RebaseStepState) {
 		let configs: string[] | undefined;
 		if (state.flags.includes('--interactive')) {
 			await this.container.rebaseEditor.enableForNextUse();

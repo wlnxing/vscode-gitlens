@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await */
 import type {
 	AuthenticationSession,
+	AuthenticationSessionsChangeEvent,
 	CancellationToken,
 	Disposable,
 	Event,
@@ -8,9 +9,8 @@ import type {
 	TextDocument,
 	WorkspaceFolder,
 } from 'vscode';
-import { EventEmitter, FileType, Uri, window, workspace } from 'vscode';
+import { authentication, EventEmitter, FileType, Uri, window, workspace } from 'vscode';
 import { encodeUtf8Hex } from '@env/hex';
-import { isWeb } from '@env/platform';
 import { CharCode, Schemes } from '../../../../constants';
 import { HostingIntegrationId } from '../../../../constants.integrations';
 import type { Container } from '../../../../container';
@@ -80,10 +80,7 @@ import { GitDocumentState } from '../../../../trackers/trackedDocument';
 import { getBuiltInIntegrationSession } from '../../../gk/utils/-webview/integrationAuthentication.utils';
 import type { GitHubAuthorityMetadata, Metadata, RemoteHubApi } from '../../../remotehub';
 import { getRemoteHubApi, HeadType, RepositoryRefType } from '../../../remotehub';
-import type {
-	IntegrationAuthenticationService,
-	IntegrationAuthenticationSessionDescriptor,
-} from '../../authentication/integrationAuthentication';
+import type { IntegrationAuthenticationSessionDescriptor } from '../../authentication/integrationAuthenticationProvider';
 import type { GitHubApi } from './github';
 import { fromCommitFileStatus } from './models';
 import { BranchesGitSubProvider } from './sub-providers/branches';
@@ -143,23 +140,20 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 	private readonly _cache: GitCache;
 	private readonly _disposables: Disposable[] = [];
 
-	constructor(
-		private readonly container: Container,
-		private readonly authenticationService: IntegrationAuthenticationService,
-	) {
+	constructor(private readonly container: Container) {
 		this._cache = new GitCache(this.container);
-		void authenticationService.get(this.authenticationProviderId).then(authProvider => {
-			this._disposables.push(authProvider.onDidChange(this.onAuthenticationSessionsChanged, this));
-		});
+		this._disposables.push(authentication.onDidChangeSessions(this.onAuthenticationSessionsChanged, this));
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposables.forEach(d => void d.dispose());
 	}
 
-	private onAuthenticationSessionsChanged() {
-		this._sessionPromise = undefined;
-		void this.ensureSession(false, true);
+	private onAuthenticationSessionsChanged(e: AuthenticationSessionsChangeEvent) {
+		if (e.provider.id === this.authenticationProviderId) {
+			this._sessionPromise = undefined;
+			void this.ensureSession(false, true);
+		}
 	}
 
 	private onRepositoryChanged(repo: Repository, e: RepositoryChangeEvent) {
@@ -397,7 +391,7 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 	}
 
 	@log()
-	async getWorkingUri(repoPath: string, uri: Uri) {
+	async getWorkingUri(repoPath: string, uri: Uri): Promise<Uri> {
 		return this.createVirtualUri(repoPath, undefined, uri.path);
 	}
 
@@ -1192,7 +1186,7 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 		options?: {
 			filter?: { branches?: (b: GitBranch) => boolean; tags?: (t: GitTag) => boolean };
 		},
-	) {
+	): Promise<boolean> {
 		const [{ values: branches }, { values: tags }] = await Promise.all([
 			this.branches.getBranches(repoPath, {
 				filter: options?.filter?.branches,
@@ -1232,7 +1226,7 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 		ref: string,
 		pathOrUri?: string | Uri,
 		_options?: { force?: boolean; timeout?: number },
-	) {
+	): Promise<string> {
 		if (
 			!ref ||
 			ref === deletedOrMissing ||
@@ -1459,41 +1453,36 @@ export class GitHubGitProvider implements GitProvider, Disposable {
 
 	private _sessionPromise: Promise<AuthenticationSession> | undefined;
 	private async ensureSession(force: boolean = false, silent: boolean = false): Promise<AuthenticationSession> {
-		// never get silent in web environments, because we assume that we always have a github session there:
-		silent = silent && !isWeb;
 		if (force || this._sessionPromise == null) {
 			async function getSession(this: GitHubGitProvider): Promise<AuthenticationSession> {
 				let skip = this.container.storage.get(`provider:authentication:skip:${this.descriptor.id}`, false);
-				const authenticationProvider = await this.authenticationService.get(this.authenticationProviderId);
-				let options:
-					| { forceNewSession: true; createIfNeeded?: never; silent?: never }
-					| { forceNewSession?: never; createIfNeeded: true; silent?: never }
-					| { forceNewSession?: never; createIfNeeded?: never; silent: true } = isWeb
-					? { createIfNeeded: true }
-					: { silent: true };
 
 				try {
+					let session;
 					if (force) {
 						skip = false;
 						void this.container.storage.delete(`provider:authentication:skip:${this.descriptor.id}`);
-						options = { forceNewSession: true };
-					} else if (!skip && !silent) {
-						options = { createIfNeeded: true };
-					} else {
-						options = isWeb ? { createIfNeeded: true } : { silent: true };
-					}
 
-					const session = isWeb
-						? await getBuiltInIntegrationSession(
-								this.container,
-								HostingIntegrationId.GitHub,
-								this.authenticationDescriptor,
-								options,
-						  )
-						: await authenticationProvider.getSession(
-								this.authenticationDescriptor,
-								options.silent ? undefined : options,
-						  );
+						session = await getBuiltInIntegrationSession(
+							this.container,
+							HostingIntegrationId.GitHub,
+							this.authenticationDescriptor,
+							{ forceNewSession: true },
+						);
+					} else if (!skip && !silent) {
+						session = await getBuiltInIntegrationSession(
+							this.container,
+							HostingIntegrationId.GitHub,
+							this.authenticationDescriptor,
+							{ createIfNeeded: true },
+						);
+					} else {
+						session = await getBuiltInIntegrationSession(
+							this.container,
+							HostingIntegrationId.GitHub,
+							this.authenticationDescriptor,
+						);
+					}
 
 					if (session != null) return session;
 

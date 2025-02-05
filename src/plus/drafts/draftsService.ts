@@ -1,5 +1,5 @@
 import type { EntityIdentifier } from '@gitkraken/provider-apis';
-import { EntityIdentifierUtils } from '@gitkraken/provider-apis';
+import { EntityIdentifierUtils } from '@gitkraken/provider-apis/entity-identifiers';
 import type { Disposable } from 'vscode';
 import type { HeadersInit } from '@env/fetch';
 import { getAvatarUri } from '../../avatars';
@@ -475,6 +475,8 @@ export class DraftService implements Disposable {
 
 		const drafts = ((await rsp.json()) as Result).data;
 
+		if (drafts.length === 0) return [];
+
 		const [subscriptionResult, membersResult] = await Promise.allSettled([
 			this.container.subscription.getSubscription(),
 			this.container.organizations.getMembers(),
@@ -729,7 +731,7 @@ export class DraftService implements Disposable {
 		} else if (data.provider?.repoName != null) {
 			name = data.provider.repoName;
 		} else if (data.remote?.url != null && data.remote?.domain != null && data.remote?.path != null) {
-			const matcher = getRemoteProviderMatcher(this.container);
+			const matcher = await getRemoteProviderMatcher(this.container);
 			const provider = matcher(data.remote.url, data.remote.domain, data.remote.path);
 			name = provider?.repoName ?? data.remote.path;
 		} else {

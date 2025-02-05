@@ -6,7 +6,12 @@ import { customElement, query } from 'lit/decorators.js';
 import { when } from 'lit/directives/when.js';
 import type { State } from '../../home/protocol';
 import { DidFocusAccount } from '../../home/protocol';
-import { OverviewState, overviewStateContext } from '../plus/home/components/overviewState';
+import {
+	ActiveOverviewState,
+	activeOverviewStateContext,
+	InactiveOverviewState,
+	inactiveOverviewStateContext,
+} from '../plus/home/components/overviewState';
 import type { GLHomeHeader } from '../plus/shared/components/home-header';
 import { GlApp } from '../shared/app';
 import { scrollableBase } from '../shared/components/styles/lit/base.css';
@@ -27,16 +32,20 @@ import './components/repo-alerts';
 export class GlHomeApp extends GlApp<State> {
 	static override styles = [homeBaseStyles, scrollableBase, homeStyles];
 
-	@provide({ context: overviewStateContext })
-	private _overviewState!: OverviewState;
+	@provide({ context: activeOverviewStateContext })
+	private _activeOverviewState!: ActiveOverviewState;
+
+	@provide({ context: inactiveOverviewStateContext })
+	private _inactiveOverviewState!: InactiveOverviewState;
 
 	@query('gl-home-header')
 	private _header!: GLHomeHeader;
 
 	private badgeSource = { source: 'home', detail: 'badge' };
 
-	protected override createStateProvider(state: State, ipc: HostIpc) {
-		this.disposables.push((this._overviewState = new OverviewState(ipc)));
+	protected override createStateProvider(state: State, ipc: HostIpc): HomeStateProvider {
+		this.disposables.push((this._activeOverviewState = new ActiveOverviewState(ipc)));
+		this.disposables.push((this._inactiveOverviewState = new InactiveOverviewState(ipc)));
 
 		return new HomeStateProvider(this, state, ipc);
 	}
@@ -55,7 +64,7 @@ export class GlHomeApp extends GlApp<State> {
 		);
 	}
 
-	override render() {
+	override render(): unknown {
 		return html`
 			<div class="home scrollable">
 				<gl-home-header class="home__header"></gl-home-header>

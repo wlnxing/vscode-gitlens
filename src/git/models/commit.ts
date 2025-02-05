@@ -1,4 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import { Uri } from 'vscode';
 import type { EnrichedAutolink } from '../../autolinks';
 import { getAvatarUri, getCachedAvatarUri } from '../../avatars';
@@ -360,13 +360,13 @@ export class GitCommit implements GitRevisionReference {
 		return this._files?.find(f => f.path === relativePath);
 	}
 
-	formatDate(format?: string | null) {
+	formatDate(format?: string | null): string {
 		return this.container.CommitDateFormatting.dateSource === 'committed'
 			? this.committer.formatDate(format)
 			: this.author.formatDate(format);
 	}
 
-	formatDateFromNow(short?: boolean) {
+	formatDateFromNow(short?: boolean): string {
 		return this.container.CommitDateFormatting.dateSource === 'committed'
 			? this.committer.fromNow(short)
 			: this.author.fromNow(short);

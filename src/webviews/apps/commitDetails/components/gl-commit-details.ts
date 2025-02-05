@@ -44,12 +44,12 @@ export class GlCommitDetails extends GlDetailsBase {
 	state?: Serialized<State>;
 
 	@state()
-	get isStash() {
+	get isStash(): boolean {
 		return this.state?.commit?.stashNumber != null;
 	}
 
 	@state()
-	get shortSha() {
+	get shortSha(): string {
 		return this.state?.commit?.shortSha ?? '';
 	}
 
@@ -86,7 +86,7 @@ export class GlCommitDetails extends GlDetailsBase {
 		return actions;
 	}
 
-	override updated(changedProperties: Map<string, any>) {
+	override updated(changedProperties: Map<string, any>): void {
 		if (changedProperties.has('explain')) {
 			this.explainBusy = false;
 			this.querySelector('[data-region="commit-explanation"]')?.scrollIntoView();
@@ -223,24 +223,24 @@ export class GlCommitDetails extends GlDetailsBase {
 
 		if (this.state?.autolinkedIssues != null) {
 			for (const issue of this.state.autolinkedIssues) {
-				deduped.set(issue.id, { type: 'issue', value: issue });
 				if (issue.url != null) {
 					const autoLinkId = autolinkIdsByUrl.get(issue.url);
 					if (autoLinkId != null) {
 						deduped.delete(autoLinkId);
 					}
 				}
+				deduped.set(issue.id, { type: 'issue', value: issue });
 			}
 		}
 
 		if (this.state?.pullRequest != null) {
-			deduped.set(this.state.pullRequest.id, { type: 'pr', value: this.state.pullRequest });
 			if (this.state.pullRequest.url != null) {
 				const autoLinkId = autolinkIdsByUrl.get(this.state.pullRequest.url);
 				if (autoLinkId != null) {
 					deduped.delete(autoLinkId);
 				}
 			}
+			deduped.set(this.state.pullRequest.id, { type: 'pr', value: this.state.pullRequest });
 		}
 
 		const autolinks: Serialized<Autolink>[] = [];
@@ -474,7 +474,7 @@ export class GlCommitDetails extends GlDetailsBase {
 		`;
 	}
 
-	override render() {
+	override render(): unknown {
 		if (this.state?.commit == null) {
 			return this.renderEmptyContent();
 		}
@@ -492,7 +492,7 @@ export class GlCommitDetails extends GlDetailsBase {
 		`;
 	}
 
-	onExplainChanges(e: MouseEvent | KeyboardEvent) {
+	private onExplainChanges(e: MouseEvent | KeyboardEvent) {
 		if (this.explainBusy === true || (e instanceof KeyboardEvent && e.key !== 'Enter')) {
 			e.preventDefault();
 			e.stopPropagation();

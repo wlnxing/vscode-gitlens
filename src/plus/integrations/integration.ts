@@ -35,9 +35,9 @@ import { getLogScope } from '../../system/logger.scope';
 import { isSubscriptionStatePaidOrTrial } from '../gk/utils/subscription.utils';
 import type {
 	IntegrationAuthenticationProviderDescriptor,
-	IntegrationAuthenticationService,
 	IntegrationAuthenticationSessionDescriptor,
-} from './authentication/integrationAuthentication';
+} from './authentication/integrationAuthenticationProvider';
+import type { IntegrationAuthenticationService } from './authentication/integrationAuthenticationService';
 import type { ProviderAuthenticationSession } from './authentication/models';
 import type {
 	GetIssuesOptions,
@@ -173,7 +173,9 @@ export abstract class IntegrationBase<
 	}
 
 	protected _session: ProviderAuthenticationSession | null | undefined;
-	getSession(source: Sources) {
+	getSession(
+		source: Sources,
+	): ProviderAuthenticationSession | Promise<ProviderAuthenticationSession | undefined> | undefined {
 		if (this._session === undefined) {
 			return this.ensureSession({ createIfNeeded: false, source: source });
 		}
@@ -262,7 +264,7 @@ export abstract class IntegrationBase<
 		void (await this.ensureSession({ createIfNeeded: true, forceNewSession: true }));
 	}
 
-	refresh() {
+	refresh(): void {
 		void this.ensureSession({ createIfNeeded: false });
 	}
 

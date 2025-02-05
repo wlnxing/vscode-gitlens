@@ -22,8 +22,8 @@ import { ensurePaidPlan } from '../../plus/gk/utils/-webview/plus.utils';
 import { createQuickPickSeparator } from '../../quickpicks/items/common';
 import { executeCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
-import type { OpenWorkspaceLocation } from '../../system/-webview/utils';
-import { findOrOpenEditor, openWorkspace } from '../../system/-webview/utils';
+import type { OpenWorkspaceLocation } from '../../system/-webview/vscode';
+import { findOrOpenEditor, openWorkspace } from '../../system/-webview/vscode';
 import { debug } from '../../system/decorators/log';
 import { once } from '../../system/event';
 import { Logger } from '../../system/logger';
@@ -74,7 +74,7 @@ export class DeepLinkService implements Disposable {
 		void this.processPendingDeepLink(pendingDeepLink);
 	}
 
-	dispose() {
+	dispose(): void {
 		Disposable.from(...this._disposables).dispose();
 	}
 
@@ -124,7 +124,7 @@ export class DeepLinkService implements Disposable {
 		}
 	}
 
-	async processDeepLinkUri(uri: Uri, useProgress: boolean = true, repo?: Repository) {
+	async processDeepLinkUri(uri: Uri, useProgress: boolean = true, repo?: Repository): Promise<void> {
 		const link = parseDeepLinkUri(uri);
 		if (link == null) return;
 
@@ -709,10 +709,9 @@ export class DeepLinkService implements Disposable {
 					}
 
 					if (!this._context.repo && state === DeepLinkServiceState.RepoMatch) {
-						matchingLocalRepoPaths = await this.container.repositoryPathMapping.getLocalRepoPaths({
-							remoteUrl: remoteUrlToSearch,
-						});
-						if (matchingLocalRepoPaths.length > 0) {
+						matchingLocalRepoPaths =
+							(await this.container.repositoryLocator?.getLocation(remoteUrlToSearch)) ?? [];
+						if (matchingLocalRepoPaths.length) {
 							for (const repo of this.container.git.repositories) {
 								if (
 									matchingLocalRepoPaths.some(
@@ -851,10 +850,7 @@ export class DeepLinkService implements Disposable {
 							repoOpenType !== 'workspace' &&
 							!matchingLocalRepoPaths.includes(this._context.repoOpenUri.fsPath)
 						) {
-							await this.container.repositoryPathMapping.writeLocalRepoPath(
-								{ remoteUrl: remoteUrl },
-								chosenRepo.uri.fsPath,
-							);
+							await this.container.repositoryLocator?.storeLocation(chosenRepo.uri.fsPath, remoteUrl);
 						}
 					}
 

@@ -2,7 +2,7 @@ import type { Range, Uri } from 'vscode';
 import { env } from 'vscode';
 import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
 import type { ResourceDescriptor } from '../../plus/integrations/integration';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { encodeUrl } from '../../system/encoding';
 import { getSettledValue } from '../../system/promise';
@@ -70,7 +70,7 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 	}
 
 	@memoize()
-	get remoteKey() {
+	get remoteKey(): string {
 		return this.domain ? `${this.domain}/${this.path}` : this.path;
 	}
 
@@ -162,7 +162,7 @@ export abstract class RemoteProvider<T extends ResourceDescriptor = ResourceDesc
 		return `${this.protocol}://${this.domain}/${this.path}`;
 	}
 
-	protected formatName(name: string) {
+	protected formatName(name: string): string {
 		if (this._name != null) {
 			return this._name;
 		}

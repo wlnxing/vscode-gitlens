@@ -13,7 +13,8 @@ import { getChangedFilesCount } from '../../../git/utils/commit.utils';
 import type { SubscriptionChangeEvent } from '../../../plus/gk/subscriptionService';
 import { executeCommand, registerCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
-import { getTabUri, isFolderUri } from '../../../system/-webview/utils';
+import { isFolderUri } from '../../../system/-webview/path';
+import { getTabUri } from '../../../system/-webview/vscode';
 import { createFromDateDelta } from '../../../system/date';
 import { debug } from '../../../system/decorators/log';
 import type { Deferrable } from '../../../system/function';
@@ -79,7 +80,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -180,7 +181,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		return commands;
 	}
 
-	onVisibilityChanged(visible: boolean) {
+	onVisibilityChanged(visible: boolean): void {
 		if (!visible) return;
 
 		if (this.host.isHost('view')) {
@@ -188,7 +189,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 	}
 
-	async onMessageReceived(e: IpcMessage) {
+	async onMessageReceived(e: IpcMessage): Promise<void> {
 		switch (true) {
 			case OpenDataPointCommand.is(e): {
 				if (e.params.data == null || !e.params.data.selected || this._context.uri == null) return;

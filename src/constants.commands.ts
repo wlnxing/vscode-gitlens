@@ -664,6 +664,9 @@ export type TreeViewCommands = `gitlens.views.${
 	| 'openWorktreeInNewWindow.multi'
 	| 'setResultsCommitsFilterAuthors'
 	| 'setResultsCommitsFilterOff'
+	| 'setResultsFilesFilterOff'
+	| 'setResultsFilesFilterOnLeft'
+	| 'setResultsFilesFilterOnRight'
 	| 'setContributorsStatisticsOff'
 	| 'setContributorsStatisticsOn'
 	| 'abortPausedOperation'
@@ -826,6 +829,7 @@ type TimelineWebviewCommands = `timeline.${'refresh' | 'split'}`;
 
 export type WebviewCommands = `gitlens.${HomeWebviewCommands | GraphWebviewCommands | TimelineWebviewCommands}`;
 
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
 type CommitDetailsWebviewViewCommands = `commitDetails.${'refresh'}`;
 
 type HomeWebviewViewCommands = `home.${
@@ -843,6 +847,7 @@ type HomeWebviewViewCommands = `home.${
 	| 'discussions'
 	| 'account.resync'}`;
 
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
 type GraphDetailsWebviewViewCommands = `graphDetails.${'refresh'}`;
 
 type GraphWebviewViewCommands = `graph.${'refresh' | 'openInTab'}`;

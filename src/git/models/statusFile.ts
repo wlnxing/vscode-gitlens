@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Uri } from 'vscode';
 import type { Container } from '../../container';
 import { memoize } from '../../system/decorators/-webview/memoize';
@@ -90,11 +91,11 @@ export class GitStatusFile implements GitFile {
 		}
 	}
 
-	get conflicted() {
+	get conflicted(): boolean {
 		return this.conflictStatus != null;
 	}
 
-	get staged() {
+	get staged(): boolean {
 		return this.indexStatus != null;
 	}
 
@@ -108,7 +109,7 @@ export class GitStatusFile implements GitFile {
 		return this.container.git.getAbsoluteUri(this.path, this.repoPath);
 	}
 
-	get wip() {
+	get wip(): boolean {
 		return this.workingTreeStatus != null;
 	}
 

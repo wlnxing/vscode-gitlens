@@ -19,6 +19,7 @@ import {
 } from '../../commands/quickCommand';
 import {
 	ConnectIntegrationButton,
+	OpenOnAzureDevOpsQuickInputButton,
 	OpenOnGitHubQuickInputButton,
 	OpenOnGitLabQuickInputButton,
 	OpenOnJiraQuickInputButton,
@@ -42,7 +43,7 @@ import type { DirectiveQuickPickItem } from '../../quickpicks/items/directive';
 import { createDirectiveQuickPickItem, Directive } from '../../quickpicks/items/directive';
 import { executeCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
 import { getScopedCounter } from '../../system/counter';
 import { fromNow } from '../../system/date';
 import { some } from '../../system/iterable';
@@ -94,6 +95,7 @@ export const supportedStartWorkIntegrations = [
 	SelfHostedIntegrationId.CloudGitHubEnterprise,
 	HostingIntegrationId.GitLab,
 	SelfHostedIntegrationId.CloudGitLabSelfHosted,
+	HostingIntegrationId.AzureDevOps,
 	IssueIntegrationId.Jira,
 ];
 export type SupportedStartWorkIntegrationIds = (typeof supportedStartWorkIntegrations)[number];
@@ -481,6 +483,7 @@ export abstract class StartWorkBaseCommand extends QuickCommand<State> {
 			},
 			onDidClickItemButton: (_quickpick, button, { item }) => {
 				switch (button) {
+					case OpenOnAzureDevOpsQuickInputButton:
 					case OpenOnGitHubQuickInputButton:
 					case OpenOnGitLabQuickInputButton:
 					case OpenOnJiraQuickInputButton:
@@ -688,7 +691,7 @@ function repeatSpaces(count: number) {
 	return ' '.repeat(count);
 }
 
-export function getStartWorkItemIdHash(item: StartWorkItem) {
+export function getStartWorkItemIdHash(item: StartWorkItem): string {
 	return md5(item.item.issue.id);
 }
 
@@ -710,6 +713,8 @@ function buildItemTelemetryData(item: StartWorkItem) {
 
 function getOpenOnWebQuickInputButton(integrationId: string): QuickInputButton | undefined {
 	switch (integrationId) {
+		case HostingIntegrationId.AzureDevOps:
+			return OpenOnAzureDevOpsQuickInputButton;
 		case HostingIntegrationId.GitHub:
 		case SelfHostedIntegrationId.CloudGitHubEnterprise:
 			return OpenOnGitHubQuickInputButton;

@@ -7,12 +7,12 @@ import { ifDefined } from 'lit/directives/if-defined.js';
 import { when } from 'lit/directives/when.js';
 import { createCommandLink } from '../../../../../system/commands';
 import { createWebviewCommandLink } from '../../../../../system/webview';
-import type { GetOverviewBranch, OpenInGraphParams, State } from '../../../../home/protocol';
+import type { GetActiveOverviewResponse, GetOverviewBranch, OpenInGraphParams, State } from '../../../../home/protocol';
 import { stateContext } from '../../../home/context';
 import { linkStyles } from '../../shared/components/vscode.css';
 import { branchCardStyles, GlBranchCardBase } from './branch-card';
-import type { Overview, OverviewState } from './overviewState';
-import { overviewStateContext } from './overviewState';
+import type { ActiveOverviewState } from './overviewState';
+import { activeOverviewStateContext } from './overviewState';
 import '../../../shared/components/button';
 import '../../../shared/components/code-icon';
 import '../../../shared/components/skeleton-loader';
@@ -52,6 +52,9 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 			.tooltip {
 				text-transform: none;
 			}
+			.uppercase {
+				text-transform: uppercase;
+			}
 		`,
 	];
 
@@ -59,18 +62,18 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 	@state()
 	private _homeState!: State;
 
-	@consume({ context: overviewStateContext })
-	private _overviewState!: OverviewState;
+	@consume({ context: activeOverviewStateContext })
+	private _activeOverviewState!: ActiveOverviewState;
 
-	override connectedCallback() {
+	override connectedCallback(): void {
 		super.connectedCallback();
 
 		if (this._homeState.repositories.openCount > 0) {
-			this._overviewState.run();
+			this._activeOverviewState.run();
 		}
 	}
 
-	override render() {
+	override render(): unknown {
 		if (this._homeState.discovering) {
 			return this.renderLoader();
 		}
@@ -79,7 +82,7 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 			return nothing;
 		}
 
-		return this._overviewState.render({
+		return this._activeOverviewState.render({
 			pending: () => this.renderPending(),
 			complete: overview => this.renderComplete(overview),
 			error: () => html`<span>Error</span>`,
@@ -96,20 +99,36 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 	}
 
 	private renderPending() {
-		if (this._overviewState.state == null) {
+		if (this._activeOverviewState.state == null) {
 			return this.renderLoader();
 		}
-		return this.renderComplete(this._overviewState.state, true);
+		return this.renderComplete(this._activeOverviewState.state, true);
 	}
 
-	private renderComplete(overview: Overview, isFetching = false) {
+	private renderComplete(overview: GetActiveOverviewResponse, isFetching = false) {
 		const repo = overview?.repository;
-		const activeBranches = repo?.branches?.active;
-		if (!activeBranches) return html`<span>None</span>`;
+		const activeBranch = overview?.active;
+		if (!repo || !activeBranch) return html`<span>None</span>`;
 
 		return html`
 			<gl-section ?loading=${isFetching}>
-				<span slot="heading">${this.renderRepositoryIcon(repo.provider)} ${repo.name}</span>
+				<span slot="heading">
+					${this.renderRepositoryIcon(repo.provider)}
+					${when(
+						this._homeState.repositories.openCount > 1,
+						() =>
+							html`<gl-button
+								aria-busy="${ifDefined(isFetching)}"
+								?disabled=${isFetching}
+								class="section-heading-action"
+								appearance="toolbar"
+								tooltip="Change Repository"
+								@click=${(e: MouseEvent) => this.onChange(e)}
+								><span class="uppercase">${repo.name}</span><code-icon icon="chevron-down"></code-icon
+							></gl-button>`,
+						() => html`${repo.name}`,
+					)}
+				</span>
 				<span slot="heading-actions"
 					><gl-button
 						aria-busy="${ifDefined(isFetching)}"
@@ -119,7 +138,7 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 						tooltip="Open in Commit Graph"
 						href=${createCommandLink('gitlens.home.openInGraph', {
 							type: 'repo',
-							repoPath: this._overviewState.state!.repository.path,
+							repoPath: this._activeOverviewState.state!.repository.path,
 						} satisfies OpenInGraphParams)}
 						><code-icon icon="gl-graph"></code-icon
 					></gl-button>
@@ -132,23 +151,8 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 						href=${createCommandLink('gitlens.home.fetch', undefined)}
 						><code-icon icon="repo-fetch"></code-icon
 					></gl-button>
-					${when(
-						this._homeState.repositories.openCount > 1,
-						() =>
-							html`<gl-button
-								aria-busy="${ifDefined(isFetching)}"
-								?disabled=${isFetching}
-								class="section-heading-action"
-								appearance="toolbar"
-								tooltip="Change Repository"
-								@click=${(e: MouseEvent) => this.onChange(e)}
-								><code-icon icon="chevron-down"></code-icon
-							></gl-button>`,
-					)}</span
-				>
-				${activeBranches.map(branch => {
-					return this.renderRepoBranchCard(branch, repo.path, isFetching);
-				})}
+				</span>
+				${this.renderRepoBranchCard(activeBranch, repo.path, isFetching)}
 			</gl-section>
 		`;
 	}
@@ -185,7 +189,7 @@ export class GlActiveWork extends SignalWatcher(LitElement) {
 	}
 
 	private onChange(_e: MouseEvent) {
-		void this._overviewState.changeRepository();
+		this._activeOverviewState.changeRepository();
 	}
 }
 
@@ -215,7 +219,7 @@ export class GlActiveBranchCard extends GlBranchCardBase {
 		this.toggleExpanded(true);
 	}
 
-	override render() {
+	override render(): unknown {
 		return html`
 			${this.renderBranchIndicator()}${this.renderBranchItem(
 				html`${this.renderBranchStateActions()}${this.renderBranchActions()}`,
@@ -362,7 +366,7 @@ export class GlActiveBranchCard extends GlBranchCardBase {
 		return wrappedActions();
 	}
 
-	protected renderBranchIndicator() {
+	protected renderBranchIndicator(): TemplateResult | undefined {
 		const wip = this.wip;
 		if (wip?.pausedOpStatus == null) return undefined;
 
@@ -372,11 +376,11 @@ export class GlActiveBranchCard extends GlBranchCardBase {
 		></gl-merge-rebase-status>`;
 	}
 
-	protected getBranchActions() {
+	protected getBranchActions(): TemplateResult[] {
 		return [];
 	}
 
-	protected getPrActions() {
+	protected getPrActions(): TemplateResult[] {
 		return [
 			html`<action-item
 				label="Open Pull Request Changes"

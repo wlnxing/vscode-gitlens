@@ -156,6 +156,10 @@ export default ts.config(
 				},
 			],
 			'@typescript-eslint/consistent-type-imports': ['error', { disallowTypeAnnotations: false }],
+			'@typescript-eslint/explicit-module-boundary-types': [
+				'error',
+				{ allowArgumentsExplicitlyTypedAsAny: true },
+			],
 			'@typescript-eslint/naming-convention': [
 				'error',
 				{
@@ -212,6 +216,7 @@ export default ts.config(
 			'@typescript-eslint/no-inferrable-types': ['warn', { ignoreParameters: true, ignoreProperties: true }],
 			'@typescript-eslint/no-invalid-void-type': 'off',
 			'@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
+			'@typescript-eslint/no-misused-spread': 'off', // Too noisy
 			'@typescript-eslint/no-non-null-assertion': 'off',
 			'@typescript-eslint/no-redundant-type-constituents': 'off',
 			'@typescript-eslint/no-restricted-imports': [
@@ -252,6 +257,16 @@ export default ts.config(
 						'util',
 						'vm',
 						'zlib',
+						{
+							name: 'react-dom',
+							importNames: ['Container'],
+							message: 'Use our Container instead',
+						},
+						{
+							name: 'vscode',
+							importNames: ['CancellationError'],
+							message: 'Use our CancellationError instead',
+						},
 					],
 					patterns: [
 						{
@@ -259,14 +274,8 @@ export default ts.config(
 							message: 'Use @env/ instead',
 						},
 						{
-							group: ['react-dom'],
-							importNames: ['Container'],
-							message: 'Use our Container instead',
-						},
-						{
-							group: ['vscode'],
-							importNames: ['CancellationError'],
-							message: 'Use our CancellationError instead',
+							group: ['**/webview/**/*'],
+							message: "Can't use any `webview`-only modules in extension",
 						},
 					],
 				},
@@ -339,14 +348,14 @@ export default ts.config(
 			'@typescript-eslint/no-restricted-imports': [
 				'error',
 				{
-					patterns: [
+					paths: [
 						{
-							group: ['react-dom'],
+							name: 'react-dom',
 							importNames: ['Container'],
 							message: 'Use our Container instead',
 						},
 						{
-							group: ['vscode'],
+							name: 'vscode',
 							importNames: ['CancellationError'],
 							message: 'Use our CancellationError instead',
 						},
@@ -412,15 +421,80 @@ export default ts.config(
 			'@typescript-eslint/no-restricted-imports': [
 				'error',
 				{
+					paths: [
+						{
+							name: 'vscode',
+							message: "Can't use `vscode` in webviews",
+							allowTypeImports: true,
+						},
+					],
 					patterns: [
 						{
-							group: ['Container'],
+							group: ['container'],
+							importNames: ['Container'],
 							message: "Can't use `Container` in webviews",
 							allowTypeImports: true,
 						},
 						{
-							group: ['vscode'],
+							group: ['**/-webview/**/*'],
+							message: "Can't use any `-webview` modules in webviews",
+							allowTypeImports: true,
+						},
+					],
+				},
+			],
+		},
+		settings: {
+			wc: {
+				elementBaseClasses: [
+					'LitElement', // Recognize `LitElement` as a Custom Element base class
+					'GlElement',
+				],
+			},
+		},
+	},
+	{
+		name: 'webviews-apps-only',
+		...litConfigs['flat/recommended'],
+		...wcConfigs['flat/recommended'],
+		files: ['src/webviews/apps/**/*'],
+		ignores: ['**/-webview/**/*'],
+		languageOptions: {
+			globals: {
+				...globals.browser,
+			},
+			parser: ts.parser,
+			parserOptions: {
+				ecmaVersion: 2022,
+				sourceType: 'module',
+				ecmaFeatures: {
+					impliedStrict: true,
+				},
+				projectService: true,
+			},
+		},
+		rules: {
+			'@typescript-eslint/explicit-module-boundary-types': 'off',
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'vscode',
 							message: "Can't use `vscode` in webviews",
+							allowTypeImports: true,
+						},
+					],
+					patterns: [
+						{
+							group: ['container'],
+							importNames: ['Container'],
+							message: "Can't use `Container` in webviews",
+							allowTypeImports: true,
+						},
+						{
+							group: ['**/-webview/**/*'],
+							message: "Can't use any `-webview` modules in webviews",
 							allowTypeImports: true,
 						},
 					],

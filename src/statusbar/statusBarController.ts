@@ -10,7 +10,7 @@ import type { PullRequest } from '../git/models/pullRequest';
 import { detailsMessage } from '../hovers/hovers';
 import { createCommand } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
-import { isTrackableTextEditor } from '../system/-webview/utils';
+import { isTrackableTextEditor } from '../system/-webview/vscode';
 import { createMarkdownCommandLink } from '../system/commands';
 import { debug } from '../system/decorators/log';
 import { once } from '../system/event';
@@ -34,7 +34,7 @@ export class StatusBarController implements Disposable {
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this.clearBlame();
 
 		this._statusBarBlame?.dispose();
@@ -199,7 +199,7 @@ export class StatusBarController implements Disposable {
 		}
 	}
 
-	clearBlame() {
+	clearBlame(): void {
 		this._selectedSha = undefined;
 		this._cancellation?.cancel();
 		this._statusBarBlame?.hide();

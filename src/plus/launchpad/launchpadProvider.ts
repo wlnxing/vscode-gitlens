@@ -2,8 +2,8 @@ import type {
 	CodeSuggestionsCountByPrUuid,
 	EnrichedItemsByUniqueId,
 	PullRequestWithUniqueID,
-} from '@gitkraken/provider-apis';
-import type { CancellationToken, ConfigurationChangeEvent } from 'vscode';
+} from '@gitkraken/provider-apis/providers';
+import type { CancellationToken, ConfigurationChangeEvent, Event } from 'vscode';
 import { Disposable, env, EventEmitter, Uri, window } from 'vscode';
 import { md5 } from '@env/crypto';
 import { GlCommand } from '../../constants.commands';
@@ -28,7 +28,7 @@ import {
 import { executeCommand, registerCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
 import { setContext } from '../../system/-webview/context';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
 import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { filterMap, groupByMap, map, some } from '../../system/iterable';
@@ -51,7 +51,12 @@ import {
 	getActionablePullRequests,
 	toProviderPullRequestWithUniqueId,
 } from '../integrations/providers/models';
-import { convertRemoteProviderIdToEnrichProvider, isEnrichableRemoteProviderId } from './enrichmentService';
+import {
+	convertIntegrationIdToEnrichProvider,
+	convertRemoteProviderIdToEnrichProvider,
+	isEnrichableIntegrationId,
+	isEnrichableRemoteProviderId,
+} from './enrichmentService';
 import type { EnrichableItem, EnrichedItem } from './models/enrichedItem';
 import type { LaunchpadAction, LaunchpadActionCategory, LaunchpadGroup } from './models/launchpad';
 import {
@@ -112,6 +117,7 @@ export const supportedLaunchpadIntegrations: (HostingIntegrationId | CloudSelfHo
 	SelfHostedIntegrationId.CloudGitHubEnterprise,
 	HostingIntegrationId.GitLab,
 	SelfHostedIntegrationId.CloudGitLabSelfHosted,
+	HostingIntegrationId.AzureDevOps,
 ];
 type SupportedLaunchpadIntegrationIds = (typeof supportedLaunchpadIntegrations)[number];
 function isSupportedLaunchpadIntegrationId(id: string): id is SupportedLaunchpadIntegrationIds {
@@ -137,12 +143,12 @@ export interface LaunchpadCategorizedTimings {
 
 export class LaunchpadProvider implements Disposable {
 	private readonly _onDidChange = new EventEmitter<void>();
-	get onDidChange() {
+	get onDidChange(): Event<void> {
 		return this._onDidChange.event;
 	}
 
 	private readonly _onDidRefresh = new EventEmitter<LaunchpadRefreshEvent>();
-	get onDidRefresh() {
+	get onDidRefresh(): Event<LaunchpadCategorizedResult> {
 		return this._onDidRefresh.event;
 	}
 
@@ -156,7 +162,7 @@ export class LaunchpadProvider implements Disposable {
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -344,7 +350,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log()
-	refresh() {
+	refresh(): void {
 		this._prs = undefined;
 		this._enrichedItems = undefined;
 		this._codeSuggestions = undefined;
@@ -353,7 +359,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['pin']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async pin(item: LaunchpadItem) {
+	async pin(item: LaunchpadItem): Promise<void> {
 		item.viewer.pinned = true;
 		this._onDidChange.fire();
 
@@ -363,7 +369,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['unpin']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async unpin(item: LaunchpadItem) {
+	async unpin(item: LaunchpadItem): Promise<void> {
 		item.viewer.pinned = false;
 		this._onDidChange.fire();
 
@@ -376,7 +382,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['snooze']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async snooze(item: LaunchpadItem) {
+	async snooze(item: LaunchpadItem): Promise<void> {
 		item.viewer.snoozed = true;
 		this._onDidChange.fire();
 
@@ -386,7 +392,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['unsnooze']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async unsnooze(item: LaunchpadItem) {
+	async unsnooze(item: LaunchpadItem): Promise<void> {
 		item.viewer.snoozed = false;
 		this._onDidChange.fire();
 
@@ -425,7 +431,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['openCodeSuggestion']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	openCodeSuggestion(item: LaunchpadItem, target: string) {
+	openCodeSuggestion(item: LaunchpadItem, target: string): void {
 		const draft = item.codeSuggestions?.value?.find(d => d.id === target);
 		if (draft == null) return;
 		this._codeSuggestions?.delete(item.uuid);
@@ -437,7 +443,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log()
-	openCodeSuggestionInBrowser(target: string) {
+	openCodeSuggestionInBrowser(target: string): void {
 		void openUrl(this.container.drafts.generateWebUrl(target));
 	}
 
@@ -474,7 +480,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['openChanges']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async openChanges(item: LaunchpadItem) {
+	async openChanges(item: LaunchpadItem): Promise<void> {
 		if (!item.openRepository?.localBranch?.current) return;
 
 		await this.switchTo(item);
@@ -493,7 +499,7 @@ export class LaunchpadProvider implements Disposable {
 	}
 
 	@log<LaunchpadProvider['openInGraph']>({ args: { 0: i => `${i.id} (${i.provider.name} ${i.type})` } })
-	async openInGraph(item: LaunchpadItem) {
+	async openInGraph(item: LaunchpadItem): Promise<void> {
 		const deepLinkUrl = this.getItemBranchDeepLink(item);
 		if (deepLinkUrl == null) return;
 
@@ -516,10 +522,10 @@ export class LaunchpadProvider implements Disposable {
 
 		return getPullRequestBranchDeepLink(
 			this.container,
+			item.underlyingPullRequest,
 			branchName,
 			item.repoIdentity.remote.url,
 			action,
-			item.underlyingPullRequest,
 		);
 	}
 
@@ -725,7 +731,10 @@ export class LaunchpadProvider implements Disposable {
 
 				const providerId = pr.pullRequest.provider.id;
 
-				if (!isSupportedLaunchpadIntegrationId(providerId) || !isEnrichableRemoteProviderId(providerId)) {
+				if (
+					!isSupportedLaunchpadIntegrationId(providerId) ||
+					(!isEnrichableRemoteProviderId(providerId) && !isEnrichableIntegrationId(providerId))
+				) {
 					Logger.warn(`Unsupported provider ${providerId}`);
 					return undefined;
 				}
@@ -734,7 +743,10 @@ export class LaunchpadProvider implements Disposable {
 					type: 'pr',
 					id: providerPr.uuid,
 					url: pr.pullRequest.url,
-					provider: convertRemoteProviderIdToEnrichProvider(providerId),
+					provider:
+						providerId === HostingIntegrationId.AzureDevOps
+							? convertIntegrationIdToEnrichProvider(providerId)
+							: convertRemoteProviderIdToEnrichProvider(providerId),
 				} satisfies EnrichableItem;
 
 				const repoIdentity = getRepositoryIdentityForPullRequest(pr.pullRequest);
@@ -989,7 +1001,7 @@ export function getLaunchpadItemGroups(item: LaunchpadItem): LaunchpadGroup[] {
 	return groups;
 }
 
-export function groupAndSortLaunchpadItems(items?: LaunchpadItem[]) {
+export function groupAndSortLaunchpadItems(items?: LaunchpadItem[]): Map<LaunchpadGroup, LaunchpadItem[]> {
 	if (items == null || items.length === 0) return new Map<LaunchpadGroup, LaunchpadItem[]>();
 	const grouped = new Map<LaunchpadGroup, LaunchpadItem[]>(launchpadGroups.map(g => [g, []]));
 
@@ -1011,7 +1023,7 @@ export function groupAndSortLaunchpadItems(items?: LaunchpadItem[]) {
 	return grouped;
 }
 
-export function countLaunchpadItemGroups(items?: LaunchpadItem[]) {
+export function countLaunchpadItemGroups(items?: LaunchpadItem[]): Map<LaunchpadGroup, number> {
 	if (items == null || items.length === 0) return new Map<LaunchpadGroup, number>();
 	const grouped = new Map<LaunchpadGroup, number>(launchpadGroups.map(g => [g, 0]));
 
@@ -1041,7 +1053,7 @@ export function countLaunchpadItemGroups(items?: LaunchpadItem[]) {
 	return grouped;
 }
 
-export function sortLaunchpadItems(items: LaunchpadItem[]) {
+export function sortLaunchpadItems(items: LaunchpadItem[]): LaunchpadItem[] {
 	return items.sort(
 		(a, b) =>
 			(a.viewer.pinned ? -1 : 1) - (b.viewer.pinned ? -1 : 1) ||
@@ -1061,25 +1073,24 @@ function ensureRemoteUrl(url: string) {
 
 export function getPullRequestBranchDeepLink(
 	container: Container,
+	pr: PullRequest,
 	headRefBranchName: string,
 	remoteUrl: string,
 	action?: DeepLinkActionType,
-	pr?: PullRequest,
-) {
+): Uri {
 	const schemeOverride = configuration.get('deepLinks.schemeOverride');
 	const scheme = typeof schemeOverride === 'string' ? schemeOverride : env.uriScheme;
 
 	const searchParams = new URLSearchParams({
-		url: ensureRemoteUrl(remoteUrl),
+		url: pr.provider.id !== HostingIntegrationId.AzureDevOps ? ensureRemoteUrl(remoteUrl) : remoteUrl,
 	});
 	if (action) {
 		searchParams.set('action', action);
 	}
-	if (pr) {
-		searchParams.set('prId', pr.id);
-		searchParams.set('prTitle', pr.title);
-	}
-	if (pr?.refs) {
+
+	searchParams.set('prId', pr.id);
+	searchParams.set('prTitle', pr.title);
+	if (pr.refs) {
 		searchParams.set('prBaseRef', pr.refs.base.sha);
 		searchParams.set('prHeadRef', pr.refs.head.sha);
 	}
@@ -1092,7 +1103,7 @@ export function getPullRequestBranchDeepLink(
 	);
 }
 
-export function getLaunchpadItemIdHash(item: LaunchpadItem) {
+export function getLaunchpadItemIdHash(item: LaunchpadItem): string {
 	return md5(item.uuid);
 }
 

@@ -108,8 +108,8 @@ import {
 } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { getContext, onDidChangeContext } from '../../../system/-webview/context';
-import type { OpenWorkspaceLocation } from '../../../system/-webview/utils';
-import { isDarkTheme, isLightTheme, openUrl, openWorkspace } from '../../../system/-webview/utils';
+import type { OpenWorkspaceLocation } from '../../../system/-webview/vscode';
+import { isDarkTheme, isLightTheme, openUrl, openWorkspace } from '../../../system/-webview/vscode';
 import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, log } from '../../../system/decorators/log';
 import type { Deferrable } from '../../../system/function';
@@ -346,7 +346,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -471,7 +471,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		return [true, this.getShownTelemetryContext()];
 	}
 
-	onRefresh(force?: boolean) {
+	onRefresh(force?: boolean): void {
 		if (force) {
 			this.resetRepositoryState();
 		}
@@ -738,7 +738,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 	}
 
-	onMessageReceived(e: IpcMessage) {
+	onMessageReceived(e: IpcMessage): void {
 		switch (true) {
 			case ChooseRepositoryCommand.is(e):
 				void this.onChooseRepository();
@@ -818,7 +818,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		void this.host.respond(requestType, msg, counts);
 	}
 
-	updateGraphConfig(params: UpdateGraphConfigurationParams) {
+	private updateGraphConfig(params: UpdateGraphConfigurationParams) {
 		const config = this.getComponentConfig();
 
 		let key: keyof UpdateGraphConfigurationParams['changes'];
@@ -864,7 +864,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 	}
 
-	updateGraphSearchMode(params: UpdateGraphSearchModeParams) {
+	private updateGraphSearchMode(params: UpdateGraphSearchModeParams) {
 		void this.container.storage.store('graph:searchMode', params.searchMode).catch();
 	}
 
@@ -1484,7 +1484,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	}
 
 	@log()
-	async onOpenPullRequestDetails(_params: OpenPullRequestDetailsParams) {
+	private async onOpenPullRequestDetails(_params: OpenPullRequestDetailsParams) {
 		// TODO: a hack for now, since we aren't using the params at all right now and always opening the current branch's PR
 		const repo = this.repository;
 		if (repo == null) return undefined;
@@ -1656,7 +1656,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		});
 	}
 
-	async onChooseRef<T extends typeof ChooseRefRequest>(requestType: T, msg: IpcCallMessageType<T>) {
+	private async onChooseRef<T extends typeof ChooseRefRequest>(requestType: T, msg: IpcCallMessageType<T>) {
 		if (this.repository == null) {
 			return this.host.respond(requestType, msg, undefined);
 		}
@@ -3818,7 +3818,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	}
 
 	@log()
-	generateCommitMessage(item?: GraphItemContext) {
+	private generateCommitMessage(item?: GraphItemContext) {
 		const ref = this.getGraphItemRef(item);
 		if (ref == null) return Promise.resolve();
 
@@ -3886,10 +3886,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				if (remoteUrl != null) {
 					const deepLink = getPullRequestBranchDeepLink(
 						this.container,
+						pr,
 						branch.getNameWithoutRemote(),
 						remoteUrl,
 						DeepLinkActionType.SwitchToPullRequestWorktree,
-						pr,
 					);
 
 					return this.container.deepLinks.processDeepLinkUri(deepLink, false, repo);
@@ -4227,6 +4227,11 @@ function toGraphIssueTrackerType(id: string): GraphIssueTrackerType | undefined 
 			return 'gitlab';
 		case IssueIntegrationId.Jira:
 			return 'jiraCloud';
+		case HostingIntegrationId.AzureDevOps:
+		case 'azure':
+		case 'azure-devops':
+			// TODO: Remove the casting once this is officially recognized by the component
+			return 'azureDevops' as GraphIssueTrackerType;
 		default:
 			return undefined;
 	}

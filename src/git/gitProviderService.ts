@@ -33,8 +33,8 @@ import { debug, log } from '../system/decorators/log';
 import type { Deferrable } from '../system/function';
 import { debounce } from '../system/function';
 import { count, filter, first, flatMap, groupByFilterMap, groupByMap, join, map, some, sum } from '../system/iterable';
-import { Logger } from '../system/logger';
-import { getLogScope, setLogScopeExit } from '../system/logger.scope';
+import { getLoggableName, Logger } from '../system/logger';
+import { getLogScope, setLogScopeExit, startLogScope } from '../system/logger.scope';
 import { getScheme, isAbsolute, maybeUri, normalizePath } from '../system/path';
 import type { Deferred } from '../system/promise';
 import { asSettled, defer, getDeferredPromiseIfPending, getSettledValue } from '../system/promise';
@@ -268,7 +268,7 @@ export class GitProviderService implements Disposable {
 		this.updateContext();
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 		this._providers.clear();
 
@@ -310,7 +310,7 @@ export class GitProviderService implements Disposable {
 	}
 
 	@debug()
-	onSubscriptionChanged(e: SubscriptionChangeEvent) {
+	private onSubscriptionChanged(e: SubscriptionChangeEvent) {
 		this.clearAccessCache();
 		this._subscription = e.current;
 	}
@@ -445,7 +445,8 @@ export class GitProviderService implements Disposable {
 			...disposables,
 			provider.onDidChange(() => {
 				this._etag = Date.now();
-				Logger.debug(`GitProvider(${id}).onDidChange()`);
+				using scope = startLogScope(`${getLoggableName(provider)}.onDidChange`, false);
+				Logger.debug(scope, '');
 
 				const { workspaceFolders } = workspace;
 				if (workspaceFolders?.length) {
@@ -454,7 +455,11 @@ export class GitProviderService implements Disposable {
 			}),
 			provider.onDidChangeRepository(async e => {
 				this._etag = Date.now();
-				Logger.debug(`GitProvider(${id}).onDidChangeRepository(e=${e.repository.toString()})`);
+				using scope = startLogScope(
+					`${getLoggableName(provider)}.onDidChangeRepository(e=${e.repository.toString()})`,
+					false,
+				);
+				Logger.debug(scope, '');
 
 				if (e.changed(RepositoryChange.Closed, RepositoryChangeComparisonMode.Any)) {
 					this.updateContext();
@@ -482,9 +487,11 @@ export class GitProviderService implements Disposable {
 			provider.onDidCloseRepository(e => {
 				this._etag = Date.now();
 				const repository = this._repositories.get(e.uri);
-				Logger.debug(
-					`GitProvider(${id}).onDidCloseRepository(e=${repository?.toString() ?? e.uri.toString()})`,
+				using scope = startLogScope(
+					`${getLoggableName(provider)}.onDidCloseRepository(e=${e.uri.toString()})`,
+					false,
 				);
+				Logger.debug(scope, `repository=${repository?.toString()}`);
 
 				if (repository != null) {
 					repository.closed = true;
@@ -493,7 +500,11 @@ export class GitProviderService implements Disposable {
 			provider.onDidOpenRepository(e => {
 				this._etag = Date.now();
 				const repository = this._repositories.get(e.uri);
-				Logger.debug(`GitProvider(${id}).onDidOpenRepository(e=${repository?.toString() ?? e.uri.toString()})`);
+				using scope = startLogScope(
+					`${getLoggableName(provider)}.onDidOpenRepository(e=${e.uri.toString()})`,
+					false,
+				);
+				Logger.debug(scope, `repository=${repository?.toString()}`);
 
 				if (repository != null) {
 					repository.closed = false;
@@ -549,7 +560,7 @@ export class GitProviderService implements Disposable {
 	}
 
 	@log({ singleLine: true })
-	async registrationComplete() {
+	async registrationComplete(): Promise<void> {
 		const scope = getLogScope();
 
 		let { workspaceFolders } = workspace;
@@ -668,7 +679,7 @@ export class GitProviderService implements Disposable {
 			if (added.length) {
 				this._etag = Date.now();
 				queueMicrotask(() => {
-					void this.addRepositoriesToPathMap(added);
+					void this.storeRepositoriesLocation(added);
 					// Defer the event trigger enough to let everything unwind
 					this.fireRepositoriesChanged(added);
 				});
@@ -1300,7 +1311,7 @@ export class GitProviderService implements Disposable {
 	}
 
 	@log()
-	getWorkingUri(repoPath: string | Uri, uri: Uri) {
+	getWorkingUri(repoPath: string | Uri, uri: Uri): Promise<Uri | undefined> {
 		const { provider, path } = this.getProvider(repoPath);
 		return provider.getWorkingUri(path, uri);
 	}
@@ -1370,7 +1381,7 @@ export class GitProviderService implements Disposable {
 		(repos, opts) => `${repos == null ? '' : repos.map(r => r.id).join(',')}|${JSON.stringify(opts)}`,
 	)
 	@log<GitProviderService['fetchAll']>({ args: { 0: repos => repos?.map(r => r.name).join(', ') } })
-	async fetchAll(repositories?: Repository[], options?: { all?: boolean; prune?: boolean }) {
+	async fetchAll(repositories?: Repository[], options?: { all?: boolean; prune?: boolean }): Promise<void> {
 		if (repositories == null) {
 			repositories = this.openRepositories;
 		}
@@ -1404,7 +1415,7 @@ export class GitProviderService implements Disposable {
 		(repos, opts) => `${repos == null ? '' : repos.map(r => r.id).join(',')}|${JSON.stringify(opts)}`,
 	)
 	@log<GitProviderService['pullAll']>({ args: { 0: repos => repos?.map(r => r.name).join(', ') } })
-	async pullAll(repositories?: Repository[], options?: { rebase?: boolean }) {
+	async pullAll(repositories?: Repository[], options?: { rebase?: boolean }): Promise<void> {
 		if (repositories == null) {
 			repositories = this.openRepositories;
 		}
@@ -1448,7 +1459,7 @@ export class GitProviderService implements Disposable {
 				remote: string;
 			};
 		},
-	) {
+	): Promise<void> {
 		if (repositories == null) {
 			repositories = this.openRepositories;
 		}
@@ -2003,7 +2014,7 @@ export class GitProviderService implements Disposable {
 				if (added.length) {
 					this._etag = Date.now();
 					queueMicrotask(() => {
-						void this.addRepositoriesToPathMap(added);
+						void this.storeRepositoriesLocation(added);
 						// Send a notification that the repositories changed
 						this.fireRepositoriesChanged(added);
 					});
@@ -2022,11 +2033,11 @@ export class GitProviderService implements Disposable {
 
 	@gate()
 	@log()
-	async addRepositoriesToPathMap(repos: Repository[]): Promise<void> {
+	async storeRepositoriesLocation(repos: Repository[]): Promise<void> {
 		const scope = getLogScope();
 		for (const repo of repos) {
 			try {
-				await this.container.repositoryIdentity.addRepositoryToPathMap(repo);
+				await this.container.repositoryIdentity.storeRepositoryLocation(repo);
 			} catch (ex) {
 				Logger.error(ex, scope);
 			}
@@ -2197,7 +2208,7 @@ export class GitProviderService implements Disposable {
 		ref: string,
 		pathOrUri?: string | Uri,
 		options?: { timeout?: number },
-	) {
+	): Promise<string> {
 		if (pathOrUri != null && isUncommittedParent(ref)) {
 			ref = 'HEAD';
 		}

@@ -15,7 +15,7 @@ import {
 import type { PagedResult } from '../../../git/gitProvider';
 import type { PullRequest, PullRequestMergeMethod } from '../../../git/models/pullRequest';
 import { base64 } from '../../../system/string';
-import type { IntegrationAuthenticationService } from '../authentication/integrationAuthentication';
+import type { IntegrationAuthenticationService } from '../authentication/integrationAuthenticationService';
 import type {
 	GetAzureProjectsForResourceFn,
 	GetAzureResourcesForUserFn,
@@ -199,9 +199,6 @@ export class ProvidersApi {
 				getPullRequestsForReposFn: providerApis.bitbucket.getPullRequestsForRepos.bind(
 					providerApis.bitbucket,
 				) as GetPullRequestsForReposFn,
-				getPullRequestsForUserFn: providerApis.bitbucket.getPullRequestsForUser.bind(
-					providerApis.bitbucket,
-				) as GetPullRequestsForUserFn,
 				getPullRequestsForRepoFn: providerApis.bitbucket.getPullRequestsForRepo.bind(
 					providerApis.bitbucket,
 				) as GetPullRequestsForRepoFn,
@@ -300,10 +297,7 @@ export class ProvidersApi {
 		provider: ProviderInfo,
 		options?: { createSessionIfNeeded?: boolean },
 	): Promise<string | undefined> {
-		const providerDescriptor =
-			provider.domain == null || provider.scopes == null
-				? undefined
-				: { domain: provider.domain, scopes: provider.scopes };
+		const providerDescriptor = { domain: provider.domain, scopes: provider.scopes };
 		try {
 			const authProvider = await this.authenticationService.get(provider.id);
 			return (

@@ -104,8 +104,7 @@ import {
 import { executeCommand } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
 import { formatPath } from '../system/-webview/formatPath';
-import { openWorkspace } from '../system/-webview/utils';
-import { getIconPathUris } from '../system/-webview/vscode';
+import { getIconPathUris, openWorkspace } from '../system/-webview/vscode';
 import { filterMap, intersection, isStringArray } from '../system/array';
 import { debounce } from '../system/function';
 import { first, map } from '../system/iterable';
@@ -147,7 +146,7 @@ import type { OpenWalkthroughCommandArgs } from './walkthroughs';
 export function appendReposToTitle<
 	State extends { repo: Repository } | { repos: Repository[] },
 	Context extends { repos: Repository[] },
->(title: string, state: State, context: Context, additionalContext?: string) {
+>(title: string, state: State, context: Context, additionalContext?: string): string {
 	if (context.repos.length === 1) {
 		return additionalContext
 			? `${title}${truncate(additionalContext, quickPickTitleMaxChars - title.length)}`
@@ -494,7 +493,7 @@ export function getValidateGitReferenceFn(
 	repos: Repository | Repository[] | undefined,
 	options?: { buttons?: QuickInputButton[]; ranges?: boolean },
 ) {
-	return async (quickpick: QuickPick<any>, value: string) => {
+	return async (quickpick: QuickPick<any>, value: string): Promise<boolean> => {
 		let inRefMode = false;
 		if (value.startsWith('#')) {
 			inRefMode = true;

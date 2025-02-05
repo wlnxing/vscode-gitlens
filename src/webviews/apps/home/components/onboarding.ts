@@ -30,8 +30,8 @@ export class GlOnboarding extends LitElement {
 	@query('#open-walkthrough')
 	private _openWalkthroughButton!: GlButton;
 
-	override render() {
-		if (!this._state.showWalkthroughProgress) {
+	override render(): unknown {
+		if (this._state.walkthroughProgress == null) {
 			return undefined;
 		}
 
@@ -71,7 +71,7 @@ export class GlOnboarding extends LitElement {
 	}
 
 	private onDismissWalkthrough() {
-		this._state.showWalkthroughProgress = false;
+		this._state.walkthroughProgress = undefined;
 		this.requestUpdate();
 		this._ipc.sendCommand(DismissWalkthroughSection);
 	}

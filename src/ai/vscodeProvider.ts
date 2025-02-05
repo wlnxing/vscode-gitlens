@@ -1,41 +1,42 @@
 import type { CancellationToken, LanguageModelChat, LanguageModelChatSelector } from 'vscode';
 import { CancellationTokenSource, LanguageModelChatMessage, lm } from 'vscode';
+import type { VSCodeAIModels } from '../constants.ai';
 import type { TelemetryEvents } from '../constants.telemetry';
 import type { Container } from '../container';
 import { configuration } from '../system/-webview/configuration';
 import { sum } from '../system/iterable';
 import { capitalize, getPossessiveForm, interpolate } from '../system/string';
 import type { AIModel, AIProvider } from './aiProviderService';
-import { getMaxCharacters, showDiffTruncationWarning } from './aiProviderService';
+import { getMaxCharacters, getValidatedTemperature, showDiffTruncationWarning } from './aiProviderService';
 import {
-	explainChangesSystemPrompt,
 	explainChangesUserPrompt,
-	generateCloudPatchMessageSystemPrompt,
 	generateCloudPatchMessageUserPrompt,
-	generateCodeSuggestMessageSystemPrompt,
 	generateCodeSuggestMessageUserPrompt,
-	generateCommitMessageSystemPrompt,
 	generateCommitMessageUserPrompt,
 } from './prompts';
 
 const provider = { id: 'vscode', name: 'VS Code Provided' } as const;
 
 type VSCodeAIModel = AIModel<typeof provider.id> & { vendor: string; selector: LanguageModelChatSelector };
-export function isVSCodeAIModel(model: AIModel): model is AIModel<typeof provider.id> {
+
+export function isVSCodeAIModel(model: AIModel): model is AIModel<typeof provider.id, VSCodeAIModels> {
 	return model.provider.id === provider.id;
 }
+
+const accessJustification =
+	'GitLens leverages Copilot for AI-powered features to improve your workflow and development experience.';
 
 export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 	readonly id = provider.id;
 
 	private _name: string | undefined;
-	get name() {
+	get name(): string {
 		return this._name ?? provider.name;
 	}
 
 	constructor(private readonly container: Container) {}
 
-	dispose() {}
+	dispose(): void {}
 
 	async getModels(): Promise<readonly AIModel<typeof provider.id>[]> {
 		const models = await lm.selectChatModels();
@@ -53,7 +54,6 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 		reporting: TelemetryEvents['ai/generate'],
 		promptConfig: {
 			type: 'commit' | 'cloud-patch' | 'code-suggestion';
-			systemPrompt: string;
 			userPrompt: string;
 			customInstructions?: string;
 		},
@@ -77,7 +77,6 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 		try {
 			while (true) {
 				const messages: LanguageModelChatMessage[] = [
-					LanguageModelChatMessage.User(promptConfig.systemPrompt),
 					LanguageModelChatMessage.User(
 						interpolate(promptConfig.userPrompt, {
 							diff: diff.substring(0, maxCodeCharacters),
@@ -91,7 +90,14 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 				reporting['input.length'] = (reporting['input.length'] ?? 0) + sum(messages, m => m.content.length);
 
 				try {
-					const rsp = await chatModel.sendRequest(messages, {}, cancellation);
+					const rsp = await chatModel.sendRequest(
+						messages,
+						{
+							justification: accessJustification,
+							modelOptions: { temperature: getValidatedTemperature(model.temperature) },
+						},
+						cancellation,
+					);
 
 					if (diff.length > maxCodeCharacters) {
 						showDiffTruncationWarning(maxCodeCharacters, model);
@@ -151,13 +157,11 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 			codeSuggestion
 				? {
 						type: 'code-suggestion',
-						systemPrompt: generateCodeSuggestMessageSystemPrompt,
 						userPrompt: generateCodeSuggestMessageUserPrompt,
 						customInstructions: configuration.get('ai.generateCodeSuggestMessage.customInstructions'),
 				  }
 				: {
 						type: 'cloud-patch',
-						systemPrompt: generateCloudPatchMessageSystemPrompt,
 						userPrompt: generateCloudPatchMessageUserPrompt,
 						customInstructions: configuration.get('ai.generateCloudPatchMessage.customInstructions'),
 				  },
@@ -180,7 +184,6 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 			reporting,
 			{
 				type: 'commit',
-				systemPrompt: generateCommitMessageSystemPrompt,
 				userPrompt: generateCommitMessageUserPrompt,
 				customInstructions: configuration.get('ai.generateCommitMessage.customInstructions'),
 			},
@@ -216,11 +219,11 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 
 				const messages: LanguageModelChatMessage[] = [
 					LanguageModelChatMessage.User(
-						`${explainChangesSystemPrompt}.\n\n${interpolate(explainChangesUserPrompt, {
+						interpolate(explainChangesUserPrompt, {
 							diff: code,
 							message: message,
 							instructions: configuration.get('ai.explainChanges.customInstructions') ?? '',
-						})}`,
+						}),
 					),
 				];
 
@@ -228,7 +231,14 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 				reporting['input.length'] = (reporting['input.length'] ?? 0) + sum(messages, m => m.content.length);
 
 				try {
-					const rsp = await chatModel.sendRequest(messages, {}, cancellation);
+					const rsp = await chatModel.sendRequest(
+						messages,
+						{
+							justification: accessJustification,
+							modelOptions: model.temperature != null ? { temperature: model.temperature } : undefined,
+						},
+						cancellation,
+					);
 
 					if (diff.length > maxCodeCharacters) {
 						showDiffTruncationWarning(maxCodeCharacters, model);
@@ -243,6 +253,10 @@ export class VSCodeAIProvider implements AIProvider<typeof provider.id> {
 				} catch (ex) {
 					debugger;
 					let message = ex instanceof Error ? ex.message : String(ex);
+
+					if (ex instanceof Error && 'code' in ex && ex.code === 'NoPermissions') {
+						throw new Error(`User denied access to ${model.provider.name}`);
+					}
 
 					if (ex instanceof Error && 'cause' in ex && ex.cause instanceof Error) {
 						message += `\n${ex.cause.message}`;

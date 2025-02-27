@@ -1,7 +1,6 @@
 import type { QuickInputButton, QuickPick, QuickPickItem } from 'vscode';
 import { ThemeIcon } from 'vscode';
 import { GlyphChars, quickPickTitleMaxChars } from '../constants';
-import { GlCommand } from '../constants.commands';
 import { Container } from '../container';
 import type { FeatureAccess, RepoFeatureAccess } from '../features';
 import { PlusFeatures } from '../features';
@@ -45,7 +44,6 @@ import {
 } from '../git/utils/reference.utils';
 import { getHighlanderProviderName } from '../git/utils/remote.utils';
 import { createRevisionRange, isRevisionRange } from '../git/utils/revision.utils';
-import { getApplicablePromo } from '../plus/gk/utils/promo.utils';
 import { isSubscriptionPaidPlan, isSubscriptionPreviewTrialExpired } from '../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../plus/launchpad/launchpad';
 import {
@@ -104,10 +102,9 @@ import {
 import { executeCommand } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
 import { formatPath } from '../system/-webview/formatPath';
-import { openWorkspace } from '../system/-webview/utils';
-import { getIconPathUris } from '../system/-webview/vscode';
+import { getIconPathUris, openWorkspace } from '../system/-webview/vscode';
 import { filterMap, intersection, isStringArray } from '../system/array';
-import { debounce } from '../system/function';
+import { debounce } from '../system/function/debounce';
 import { first, map } from '../system/iterable';
 import { Logger } from '../system/logger';
 import { getSettledValue } from '../system/promise';
@@ -147,7 +144,7 @@ import type { OpenWalkthroughCommandArgs } from './walkthroughs';
 export function appendReposToTitle<
 	State extends { repo: Repository } | { repos: Repository[] },
 	Context extends { repos: Repository[] },
->(title: string, state: State, context: Context, additionalContext?: string) {
+>(title: string, state: State, context: Context, additionalContext?: string): string {
 	if (context.repos.length === 1) {
 		return additionalContext
 			? `${title}${truncate(additionalContext, quickPickTitleMaxChars - title.length)}`
@@ -494,7 +491,7 @@ export function getValidateGitReferenceFn(
 	repos: Repository | Repository[] | undefined,
 	options?: { buttons?: QuickInputButton[]; ranges?: boolean },
 ) {
-	return async (quickpick: QuickPick<any>, value: string) => {
+	return async (quickpick: QuickPick<any>, value: string): Promise<boolean> => {
 		let inRefMode = false;
 		if (value.startsWith('#')) {
 			inRefMode = true;
@@ -520,7 +517,7 @@ export function getValidateGitReferenceFn(
 			return true;
 		}
 
-		if (!(await repos.git.validateReference(value))) {
+		if (!(await repos.git.refs().validateReference(value))) {
 			if (inRefMode) {
 				quickpick.items = [
 					createDirectiveQuickPickItem(Directive.Back, true, {
@@ -535,7 +532,7 @@ export function getValidateGitReferenceFn(
 
 		if (!inRefMode) {
 			if (
-				await repos.git.hasBranchOrTag({
+				await repos.git.refs().hasBranchOrTag({
 					filter: { branches: b => b.name.includes(value), tags: t => t.name.includes(value) },
 				})
 			) {
@@ -576,7 +573,7 @@ export async function* inputBranchNameStep<
 			if (value.length === 0) return [false, 'Please enter a valid branch name'];
 
 			if ('repo' in state) {
-				const valid = await state.repo.git.validateBranchOrTagName(value);
+				const valid = await state.repo.git.refs().validateBranchOrTagName(value);
 				if (!valid) {
 					return [false, `'${value}' isn't a valid branch name`];
 				}
@@ -592,7 +589,7 @@ export async function* inputBranchNameStep<
 			let valid = true;
 
 			for (const repo of state.repos) {
-				valid = await repo.git.validateBranchOrTagName(value);
+				valid = await repo.git.refs().validateBranchOrTagName(value);
 				if (!valid) {
 					return [false, `'${value}' isn't a valid branch name`];
 				}
@@ -709,14 +706,14 @@ export async function* inputTagNameStep<
 			if (value.length === 0) return [false, 'Please enter a valid tag name'];
 
 			if ('repo' in state) {
-				const valid = await state.repo.git.validateBranchOrTagName(value);
+				const valid = await state.repo.git.refs().validateBranchOrTagName(value);
 				return [valid, valid ? undefined : `'${value}' isn't a valid tag name`];
 			}
 
 			let valid = true;
 
 			for (const repo of state.repos) {
-				valid = await repo.git.validateBranchOrTagName(value);
+				valid = await repo.git.refs().validateBranchOrTagName(value);
 				if (!valid) {
 					return [false, `'${value}' isn't a valid branch name`];
 				}
@@ -996,7 +993,7 @@ export function* pickBranchOrTagStepMultiRepo<
 		label: 'Choose a Pull Request...',
 		iconPath: new ThemeIcon('git-pull-request'),
 		alwaysShow: true,
-		item: createCrossCommandReference<Partial<LaunchpadCommandArgs>>(GlCommand.ShowLaunchpad, {
+		item: createCrossCommandReference<Partial<LaunchpadCommandArgs>>('gitlens.showLaunchpad', {
 			source: 'quick-wizard',
 		}),
 	};
@@ -2626,7 +2623,7 @@ function getShowRepositoryStatusStepItems<
 
 	if (context.status.files.length) {
 		items.push(
-			new CommandQuickPickItem('Close Unchanged Files', new ThemeIcon('x'), GlCommand.CloseUnchangedFiles),
+			new CommandQuickPickItem('Close Unchanged Files', new ThemeIcon('x'), 'gitlens.closeUnchangedFiles'),
 		);
 	}
 
@@ -2636,8 +2633,13 @@ function getShowRepositoryStatusStepItems<
 export async function* ensureAccessStep<
 	State extends PartialStepState & { repo?: Repository },
 	Context extends { title: string },
->(state: State, context: Context, feature: PlusFeatures): AsyncStepResultGenerator<FeatureAccess | RepoFeatureAccess> {
-	const access = await Container.instance.git.access(feature, state.repo?.path);
+>(
+	container: Container,
+	state: State,
+	context: Context,
+	feature: PlusFeatures,
+): AsyncStepResultGenerator<FeatureAccess | RepoFeatureAccess> {
+	const access = await container.git.access(feature, state.repo?.path);
 	if (access.allowed) return access;
 
 	const directives: DirectiveQuickPickItem[] = [];
@@ -2652,8 +2654,8 @@ export async function* ensureAccessStep<
 	} else {
 		if (access.subscription.required == null) return access;
 
-		const promo = getApplicablePromo(access.subscription.current.state, 'gate');
-		const detail = promo?.quickpick.detail;
+		const promo = await container.productConfig.getApplicablePromo(access.subscription.current.state, 'gate');
+		const detail = promo?.content?.quickpick.detail;
 
 		placeholder = 'Pro feature — requires a trial or GitLens Pro for use on privately-hosted repos';
 		if (isSubscriptionPaidPlan(access.subscription.required) && access.subscription.current.account != null) {
@@ -2692,10 +2694,9 @@ export async function* ensureAccessStep<
 					detail: 'Click to learn more about Launchpad',
 					iconPath: new ThemeIcon('rocket'),
 					onDidSelect: () =>
-						void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
+						void executeCommand<OpenWalkthroughCommandArgs>('gitlens.openWalkthrough', {
 							step: 'accelerate-pr-reviews',
-							source: 'launchpad',
-							detail: 'info',
+							source: { source: 'launchpad', detail: 'info' },
 						}),
 				}),
 				createQuickPickSeparator(),

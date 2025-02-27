@@ -1,8 +1,10 @@
 import { TreeItem, TreeItemCollapsibleState } from 'vscode';
+import type { AIGenerateChangelogChange } from '../../ai/aiProviderService';
 import { GitUri } from '../../git/gitUri';
 import { isStash } from '../../git/models/commit';
 import type { GitRevisionRange } from '../../git/models/revision';
 import type { CommitsQueryResults, FilesQueryResults } from '../../git/queryResults';
+import { getChangesForChangelog } from '../../git/utils/-webview/log.utils';
 import { configuration } from '../../system/-webview/configuration';
 import { gate } from '../../system/decorators/-webview/gate';
 import { debug } from '../../system/decorators/log';
@@ -209,7 +211,7 @@ export class ResultsCommitsNode<View extends ViewsWithCommits = ViewsWithCommits
 
 	@gate()
 	@debug()
-	override refresh(reset: boolean = false) {
+	override refresh(reset: boolean = false): void {
 		if (reset) {
 			this._commitsQueryResults = undefined;
 			this._commitsQueryResultsPromise = undefined;
@@ -244,7 +246,7 @@ export class ResultsCommitsNode<View extends ViewsWithCommits = ViewsWithCommits
 	}
 
 	private _hasMore = true;
-	get hasMore() {
+	get hasMore(): boolean {
 		return this._hasMore;
 	}
 
@@ -261,5 +263,12 @@ export class ResultsCommitsNode<View extends ViewsWithCommits = ViewsWithCommits
 		this.limit = results.log?.count;
 
 		void this.triggerChange(false);
+	}
+
+	async getChangesForChangelog(): Promise<AIGenerateChangelogChange[]> {
+		const { log } = await this.getCommitsQueryResults();
+		if (log == null) return [];
+
+		return getChangesForChangelog(this.view.container, log);
 	}
 }

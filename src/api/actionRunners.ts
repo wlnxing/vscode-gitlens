@@ -6,7 +6,7 @@ import type { Container } from '../container';
 import { registerCommand } from '../system/-webview/command';
 import { configuration } from '../system/-webview/configuration';
 import { setContext } from '../system/-webview/context';
-import { getQuickPickIgnoreFocusOut } from '../system/-webview/utils';
+import { getQuickPickIgnoreFocusOut } from '../system/-webview/vscode';
 import { getScopedCounter } from '../system/counter';
 import { sortCompare } from '../system/string';
 import type { Action, ActionContext, ActionRunner } from './gitlens';
@@ -68,7 +68,7 @@ class RegisteredActionRunner<T extends ActionContext = ActionContext> implements
 		this.id = runnerIdGenerator.next();
 	}
 
-	dispose() {
+	dispose(): void {
 		this.unregister();
 	}
 
@@ -146,7 +146,7 @@ export class ActionRunners implements Disposable {
 		this._disposable = Disposable.from(...subscriptions);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 
 		for (const runners of this._actionRunners.values()) {
@@ -238,7 +238,7 @@ export class ActionRunners implements Disposable {
 		);
 	}
 
-	async run<T extends ActionContext>(context: T, runnerId?: number) {
+	async run<T extends ActionContext>(context: T, runnerId?: number): Promise<void> {
 		let runners = this.get(context.type);
 		if (runners == null || runners.length === 0) return;
 

@@ -1,7 +1,7 @@
 import type { Config, GraphBranchesVisibility, GraphConfig } from './config';
 import type { WalkthroughSteps } from './constants';
-import type { AIModels, AIProviders } from './constants.ai';
-import type { GlCommand } from './constants.commands';
+import type { AIProviders } from './constants.ai';
+import type { GlCommands } from './constants.commands';
 import type { IntegrationId, SupportedCloudIntegrationIds } from './constants.integrations';
 import type { SubscriptionState, SubscriptionStateString } from './constants.subscription';
 import type { CustomEditorTypes, TreeViewTypes, WebviewTypes, WebviewViewTypes } from './constants.views';
@@ -26,6 +26,8 @@ export interface TelemetryGlobalContext extends SubscriptionEventData {
 	'cloudIntegrations.connected.count': number;
 	'cloudIntegrations.connected.ids': string;
 	debugging: boolean;
+	/** Cohort number between 1 and 100 to use for percentage-based rollouts */
+	'device.cohort': number;
 	enabled: boolean;
 	prerelease: boolean;
 	install: boolean;
@@ -55,28 +57,31 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 	/** Sent when GitLens is activated */
 	activate: ActivateEvent;
 
-	/** Sent when explaining changes from wip, commits, stashes, patches,etc. */
+	/** Sent when explaining changes from wip, commits, stashes, patches, etc. */
 	'ai/explain': AIExplainEvent;
 
 	/** Sent when generating summaries from commits, stashes, patches, etc. */
 	'ai/generate': AIGenerateEvent;
 
-	/** Sent when connecting to one or more cloud-based integrations*/
+	/** Sent when switching ai models */
+	'ai/switchModel': AISwitchModelEvent;
+
+	/** Sent when connecting to one or more cloud-based integrations */
 	'cloudIntegrations/connecting': CloudIntegrationsConnectingEvent;
 
-	/** Sent when connected to one or more cloud-based integrations from gkdev*/
+	/** Sent when connected to one or more cloud-based integrations from gkdev */
 	'cloudIntegrations/connected': CloudIntegrationsConnectedEvent;
 
-	/** Sent when disconnecting a provider from the api fails*/
+	/** Sent when disconnecting a provider from the api fails */
 	'cloudIntegrations/disconnect/failed': CloudIntegrationsDisconnectFailedEvent;
 
-	/** Sent when getting connected providers from the api fails*/
+	/** Sent when getting connected providers from the api fails */
 	'cloudIntegrations/getConnections/failed': CloudIntegrationsGetConnectionsFailedEvent;
 
-	/** Sent when getting a provider token from the api fails*/
+	/** Sent when getting a provider token from the api fails */
 	'cloudIntegrations/getConnection/failed': CloudIntegrationsGetConnectionFailedEvent;
 
-	/** Sent when refreshing a provider token from the api fails*/
+	/** Sent when refreshing a provider token from the api fails */
 	'cloudIntegrations/refreshConnection/failed': CloudIntegrationsRefreshConnectionFailedEvent;
 
 	/** Sent when a cloud-based hosting provider is connected */
@@ -182,6 +187,9 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 	/** Sent when a PR review was started in the inspect overview */
 	openReviewMode: OpenReviewModeEvent;
 
+	/** Sent when fetching the product config fails */
+	'productConfig/failed': ProductConfigFailedEvent;
+
 	/** Sent when the "context" of the workspace changes (e.g. repo added, integration connected, etc) */
 	'providers/context': void;
 
@@ -245,15 +253,15 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 	/** Sent when the subscription changes */
 	'subscription/changed': SubscriptionEventDataWithPrevious;
 
-	/** Sent when the Commit Graph is shown */
+	/** Sent when the Visual History is shown */
 	'timeline/shown': TimelineShownEvent;
-	/** Sent when the user changes the period (timeframe) on the visual file history */
+	/** Sent when the user changes the period (timeframe) on the Visual History */
 	'timeline/action/openInEditor': TimelineContextEventData;
-	/** Sent when the editor changes on the visual file history */
+	/** Sent when the editor changes on the Visual History */
 	'timeline/editor/changed': TimelineContextEventData;
-	/** Sent when the user changes the period (timeframe) on the visual file history */
+	/** Sent when the user changes the period (timeframe) on the Visual History */
 	'timeline/period/changed': TimelinePeriodChangedEvent;
-	/** Sent when the user selects (clicks on) a commit on the visual file history */
+	/** Sent when the user selects (clicks on) a commit on the Visual History */
 	'timeline/commit/selected': TimelineContextEventData;
 
 	/** Sent when a "tracked feature" is interacted with, today that is only when webview/webviewView/custom editor is shown */
@@ -288,7 +296,7 @@ interface AccountValidationFailedEvent {
 	'account.id': string;
 	exception: string;
 	code: string | undefined;
-	statusCode: string | undefined;
+	statusCode: number | undefined;
 }
 
 interface ActivateEvent extends ConfigEventData {
@@ -297,7 +305,7 @@ interface ActivateEvent extends ConfigEventData {
 }
 
 interface AIEventDataBase {
-	'model.id': AIModels;
+	'model.id': string;
 	'model.provider.id': AIProviders;
 	'model.provider.name': string;
 	'retry.count': number;
@@ -322,7 +330,27 @@ export interface AIGenerateDraftEventData extends AIEventDataBase {
 	draftType: 'patch' | 'stash' | 'suggested_pr_change';
 }
 
-type AIGenerateEvent = AIGenerateCommitEventData | AIGenerateDraftEventData;
+export interface AIGenerateStashEventData extends AIEventDataBase {
+	type: 'stashMessage';
+}
+
+export interface AIGenerateChangelogEventData extends AIEventDataBase {
+	type: 'changelog';
+}
+
+type AIGenerateEvent =
+	| AIGenerateCommitEventData
+	| AIGenerateDraftEventData
+	| AIGenerateStashEventData
+	| AIGenerateChangelogEventData;
+
+export type AISwitchModelEvent =
+	| {
+			'model.id': string;
+			'model.provider.id': AIProviders;
+			'model.provider.name': string;
+	  }
+	| { failed: true };
 
 interface CloudIntegrationsConnectingEvent {
 	'integration.ids': string | undefined;
@@ -423,7 +451,7 @@ interface CommandEventData {
 }
 
 interface GitCommandEventData {
-	command: GlCommand.GitCommands;
+	command: Extract<GlCommands, 'gitlens.gitCommands'>;
 	'context.mode'?: string;
 	'context.submode'?: string;
 	webview?: string;
@@ -654,6 +682,13 @@ interface OpenReviewModeEvent {
 	source: Sources;
 }
 
+interface ProductConfigFailedEvent {
+	reason: 'fetch' | 'validation';
+	json: string | undefined;
+	exception?: string;
+	statusCode?: number | undefined;
+}
+
 interface ProvidersRegistrationCompleteEvent {
 	'config.git.autoRepositoryDetection': boolean | 'subFolders' | 'openEditors' | undefined;
 }
@@ -765,9 +800,12 @@ export interface SubscriptionPreviousEventData
 		Partial<Flatten<NonNullable<Subscription['previewTrial']>, 'previous.subscription.previewTrial', true>> {}
 
 export interface SubscriptionEventData extends Partial<SubscriptionCurrentEventData> {
+	/** Promo key (identifier) associated with the upgrade */
+	'subscription.promo.key'?: string;
+	/** Promo discount code associated with the upgrade */
+	'subscription.promo.code'?: string;
 	'subscription.state'?: SubscriptionState;
 	'subscription.stateString'?: SubscriptionStateString;
-	'subscription.status'?: SubscriptionStateString;
 }
 
 type SubscriptionActionEventData =
@@ -780,8 +818,16 @@ type SubscriptionActionEventData =
 				| 'reactivate'
 				| 'resend-verification'
 				| 'pricing'
-				| 'start-preview-trial'
-				| 'upgrade';
+				| 'start-preview-trial';
+	  }
+	| {
+			action: 'upgrade';
+			/** `true` if the user cancels the VS Code prompt to open the browser */
+			aborted: boolean;
+			/** Promo key (identifier) associated with the upgrade */
+			'promo.key'?: string;
+			/** Promo discount code associated with the upgrade */
+			'promo.code'?: string;
 	  }
 	| {
 			action: 'visibility';

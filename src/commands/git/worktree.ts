@@ -36,7 +36,7 @@ import type { FlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { createFlagsQuickPickItem } from '../../quickpicks/items/flags';
 import { configuration } from '../../system/-webview/configuration';
 import { isDescendant } from '../../system/-webview/path';
-import { getWorkspaceFriendlyPath, openWorkspace, revealInFileExplorer } from '../../system/-webview/utils';
+import { getWorkspaceFriendlyPath, openWorkspace, revealInFileExplorer } from '../../system/-webview/vscode';
 import { basename } from '../../system/path';
 import type { Deferred } from '../../system/promise';
 import { pluralize, truncateLeft } from '../../system/string';
@@ -180,7 +180,7 @@ const subcommandToTitleMap = new Map<State['subcommand'] | undefined, string>([
 	['create', `Create Worktree`],
 	['delete', `Delete Worktrees`],
 	['open', `Open Worktree`],
-	['copy-changes', 'Copy Changes to'],
+	['copy-changes', 'Copy Changes to Worktree'],
 ]);
 function getTitle(subcommand: State['subcommand'] | undefined, suffix?: string) {
 	return `${subcommandToTitleMap.get(subcommand)}${suffix ?? ''}`;
@@ -256,7 +256,7 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 		return this._canSkipConfirmOverride ?? this.subcommand === 'open';
 	}
 
-	override get skipConfirmKey() {
+	override get skipConfirmKey(): string {
 		return `${this.key}${this.subcommand == null ? '' : `-${this.subcommand}`}:${this.pickedVia}`;
 	}
 
@@ -309,7 +309,7 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			}
 			assertStateStepRepository(state);
 
-			const result = yield* ensureAccessStep(state, context, PlusFeatures.Worktrees);
+			const result = yield* ensureAccessStep(this.container, state, context, PlusFeatures.Worktrees);
 			if (result === StepResultBreak) continue;
 
 			switch (state.subcommand) {
@@ -435,7 +435,7 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			if (state.flags.includes('-b')) {
 				let createBranchOverride: string | undefined;
 				if (state.createBranch != null) {
-					let valid = await this.container.git.validateBranchOrTagName(state.repo.path, state.createBranch);
+					let valid = await state.repo.git.refs().validateBranchOrTagName(state.createBranch);
 					if (valid) {
 						const alreadyExists = await state.repo.git.branches().getBranch(state.createBranch);
 						valid = alreadyExists == null;
@@ -1153,12 +1153,15 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 				let placeholder;
 				switch (state.changes.type) {
 					case 'index':
+						context.title = state?.overrides?.title ?? 'Copy Staged Changes to Worktree';
 						placeholder = 'Choose a worktree to copy your staged changes to';
 						break;
 					case 'working-tree':
+						context.title = state?.overrides?.title ?? 'Copy Working Changes to Worktree';
 						placeholder = 'Choose a worktree to copy your working changes to';
 						break;
 					default:
+						context.title = state?.overrides?.title ?? 'Copy Changes to Worktree';
 						placeholder = 'Choose a worktree to copy changes to';
 						break;
 				}
@@ -1176,11 +1179,11 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			}
 
 			if (!state.changes.contents || !state.changes.baseSha) {
-				const diff = await state.repo.git.getDiff(
-					state.changes.type === 'index' ? uncommittedStaged : uncommitted,
-					'HEAD',
-					{ includeUntracked: state.changes.type !== 'index' },
-				);
+				const diff = await state.repo.git
+					.diff()
+					.getDiff?.(state.changes.type === 'index' ? uncommittedStaged : uncommitted, 'HEAD', {
+						includeUntracked: state.changes.type !== 'index',
+					});
 				if (!diff?.contents) {
 					void window.showErrorMessage(`No changes to copy`);
 
@@ -1193,9 +1196,11 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			}
 
 			if (!isSha(state.changes.baseSha)) {
-				const commit = await state.repo.git.commits().getCommit(state.changes.baseSha);
-				if (commit != null) {
-					state.changes.baseSha = commit.sha;
+				const sha = await state.repo.git
+					.refs()
+					.resolveReference(state.changes.baseSha, undefined, { force: true });
+				if (sha != null) {
+					state.changes.baseSha = sha;
 				}
 			}
 
@@ -1207,7 +1212,7 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 			endSteps(state);
 
 			try {
-				const patchProvider = this.container.git.patch(state.worktree.repoPath);
+				const patchProvider = this.container.git.patch(state.worktree.uri);
 				const commit = await patchProvider?.createUnreachableCommitForPatch(
 					state.changes.contents,
 					state.changes.baseSha,
@@ -1258,7 +1263,7 @@ export class WorktreeGitCommand extends QuickCommand<State> {
 		state: CopyChangesStepState,
 		context: Context,
 	): AsyncStepResultGenerator<void> {
-		const files = await this.container.git.getDiffFiles(state.repo.uri, state.changes.contents!);
+		const files = await state.repo.git.diff().getDiffFiles?.(state.changes.contents!);
 		const count = files?.files.length ?? 0;
 
 		const confirmations = [];

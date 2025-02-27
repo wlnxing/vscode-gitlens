@@ -31,7 +31,7 @@ export class FileHistoryView extends ViewBase<
 	}
 
 	override get canSelectMany(): boolean {
-		return this.container.prereleaseOrDebugging;
+		return configuration.get('views.multiselect');
 	}
 
 	protected override get showCollapseAll(): boolean {
@@ -106,7 +106,7 @@ export class FileHistoryView extends ViewBase<
 		];
 	}
 
-	protected override filterConfigurationChanged(e: ConfigurationChangeEvent) {
+	protected override filterConfigurationChanged(e: ConfigurationChangeEvent): boolean {
 		const changed = super.filterConfigurationChanged(e);
 		if (
 			!changed &&
@@ -127,7 +127,7 @@ export class FileHistoryView extends ViewBase<
 		return true;
 	}
 
-	async showHistoryForUri(uri: GitUri) {
+	async showHistoryForUri(uri: GitUri): Promise<void> {
 		this.setCursorFollowing(false);
 
 		const root = this.ensureRoot(true);

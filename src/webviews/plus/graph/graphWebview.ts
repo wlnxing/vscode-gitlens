@@ -31,10 +31,8 @@ import { executeGitCommand } from '../../../git/actions';
 import * as BranchActions from '../../../git/actions/branch';
 import {
 	getOrderedComparisonRefs,
-	openAllChanges,
-	openAllChangesIndividually,
-	openAllChangesWithWorking,
-	openAllChangesWithWorkingIndividually,
+	openCommitChanges,
+	openCommitChangesWithWorking,
 	openComparisonChanges,
 	openFiles,
 	openFilesAtRevision,
@@ -108,12 +106,13 @@ import {
 } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { getContext, onDidChangeContext } from '../../../system/-webview/context';
-import type { OpenWorkspaceLocation } from '../../../system/-webview/utils';
-import { isDarkTheme, isLightTheme, openUrl, openWorkspace } from '../../../system/-webview/utils';
+import type { OpenWorkspaceLocation } from '../../../system/-webview/vscode';
+import { isDarkTheme, isLightTheme, openUrl, openWorkspace } from '../../../system/-webview/vscode';
 import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, log } from '../../../system/decorators/log';
-import type { Deferrable } from '../../../system/function';
-import { debounce, disposableInterval } from '../../../system/function';
+import { disposableInterval } from '../../../system/function';
+import type { Deferrable } from '../../../system/function/debounce';
+import { debounce } from '../../../system/function/debounce';
 import { count, find, last, map } from '../../../system/iterable';
 import { flatten, updateRecordValue } from '../../../system/object';
 import {
@@ -346,7 +345,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -432,7 +431,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 			let id = arg.ref.ref;
 			if (!isSha(id)) {
-				id = await this.container.git.resolveReference(arg.ref.repoPath, id, undefined, {
+				id = await this.container.git.refs(arg.ref.repoPath).resolveReference(id, undefined, {
 					force: true,
 				});
 			}
@@ -453,8 +452,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			}
 
 			if (this.repository == null && this.container.git.repositoryCount > 1) {
-				const [contexts] = parseCommandContext(GlCommand.ShowGraph, undefined, ...args);
-				const context = Array.isArray(contexts) ? contexts[0] : contexts;
+				const [context] = parseCommandContext(GlCommand.ShowGraph, undefined, ...args);
 
 				if (context.type === 'scm' && context.scm.rootUri != null) {
 					this.repository = this.container.git.getRepository(context.scm.rootUri);
@@ -471,7 +469,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		return [true, this.getShownTelemetryContext()];
 	}
 
-	onRefresh(force?: boolean) {
+	onRefresh(force?: boolean): void {
 		if (force) {
 			this.resetRepositoryState();
 		}
@@ -532,6 +530,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			this.host.registerWebviewCommand('gitlens.graph.hideTag', this.hideRef),
 
 			this.host.registerWebviewCommand('gitlens.graph.cherryPick', this.cherryPick),
+			this.host.registerWebviewCommand('gitlens.graph.cherryPick.multi', this.cherryPick),
 			this.host.registerWebviewCommand<GraphItemContext>('gitlens.graph.copyRemoteCommitUrl', item =>
 				this.openCommitOnRemote(item, true),
 			),
@@ -738,7 +737,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 	}
 
-	onMessageReceived(e: IpcMessage) {
+	onMessageReceived(e: IpcMessage): void {
 		switch (true) {
 			case ChooseRepositoryCommand.is(e):
 				void this.onChooseRepository();
@@ -818,7 +817,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		void this.host.respond(requestType, msg, counts);
 	}
 
-	updateGraphConfig(params: UpdateGraphConfigurationParams) {
+	private updateGraphConfig(params: UpdateGraphConfigurationParams) {
 		const config = this.getComponentConfig();
 
 		let key: keyof UpdateGraphConfigurationParams['changes'];
@@ -864,7 +863,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 	}
 
-	updateGraphSearchMode(params: UpdateGraphSearchModeParams) {
+	private updateGraphSearchMode(params: UpdateGraphSearchModeParams) {
 		void this.container.storage.store('graph:searchMode', params.searchMode).catch();
 	}
 
@@ -982,7 +981,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 	@debug({ args: false })
 	private onRepositoryFileSystemChanged(e: RepositoryFileSystemChangeEvent) {
-		if (e.repository?.path !== this.repository?.path) return;
+		if (e.repository.id !== this.repository?.id) return;
 		void this.notifyDidChangeWorkingTree();
 	}
 
@@ -1484,7 +1483,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	}
 
 	@log()
-	async onOpenPullRequestDetails(_params: OpenPullRequestDetailsParams) {
+	private async onOpenPullRequestDetails(_params: OpenPullRequestDetailsParams) {
 		// TODO: a hack for now, since we aren't using the params at all right now and always opening the current branch's PR
 		const repo = this.repository;
 		if (repo == null) return undefined;
@@ -1656,7 +1655,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		});
 	}
 
-	async onChooseRef<T extends typeof ChooseRefRequest>(requestType: T, msg: IpcCallMessageType<T>) {
+	private async onChooseRef<T extends typeof ChooseRefRequest>(requestType: T, msg: IpcCallMessageType<T>) {
 		if (this.repository == null) {
 			return this.host.respond(requestType, msg, undefined);
 		}
@@ -2366,7 +2365,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			dateStyle: configuration.get('graph.dateStyle') ?? configuration.get('defaultDateStyle'),
 			enabledRefMetadataTypes: this.getEnabledRefMetadataTypes(),
 			dimMergeCommits: configuration.get('graph.dimMergeCommits'),
-			enableMultiSelection: this.container.prereleaseOrDebugging,
+			enableMultiSelection: configuration.get('graph.multiselect'),
 			highlightRowsOnRefHover: configuration.get('graph.highlightRowsOnRefHover'),
 			idLength: configuration.get('advanced.abbreviatedShaLength'),
 			minimap: configuration.get('graph.minimap.enabled'),
@@ -3199,7 +3198,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private associateIssueWithBranch(item?: GraphItemContext) {
 		if (isGraphItemRefContext(item, 'branch')) {
 			const { ref } = item.webviewItemValue;
-			return executeCommand<AssociateIssueWithBranchCommandArgs>(GlCommand.AssociateIssueWithBranch, {
+			return executeCommand<AssociateIssueWithBranchCommandArgs>('gitlens.associateIssueWithBranch', {
 				command: 'associateIssueWithBranch',
 				branch: ref,
 				source: 'graph',
@@ -3211,10 +3210,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 	@log()
 	private cherryPick(item?: GraphItemContext) {
-		const ref = this.getGraphItemRef(item, 'revision');
-		if (ref == null) return Promise.resolve();
+		const { selection } = this.getGraphItemRefs(item, 'revision');
+		if (selection == null) return Promise.resolve();
 
-		return RepoActions.cherryPick(ref.repoPath, ref);
+		return RepoActions.cherryPick(selection[0].repoPath, selection);
 	}
 
 	@log()
@@ -3258,7 +3257,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 		let sha = ref.ref;
 		if (!isSha(sha)) {
-			sha = await this.container.git.resolveReference(ref.repoPath, sha, undefined, { force: true });
+			sha = await this.container.git.refs(ref.repoPath).resolveReference(sha, undefined, { force: true });
 		}
 
 		return executeCommand<CopyShaToClipboardCommandArgs, void>(GlCommand.CopyShaToClipboard, {
@@ -3320,7 +3319,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private async abortPausedOperation(_item?: GraphItemContext) {
 		if (this.repository == null) return;
 
-		const abortPausedOperation = this.container.git.status(this.repository.path).abortPausedOperation;
+		const abortPausedOperation = this.repository.git.status().abortPausedOperation;
 		if (abortPausedOperation == null) return;
 
 		try {
@@ -3334,10 +3333,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private async continuePausedOperation(_item?: GraphItemContext) {
 		if (this.repository == null) return;
 
-		const status = await this.container.git.status(this.repository.path).getPausedOperationStatus?.();
+		const status = await this.repository.git.status().getPausedOperationStatus?.();
 		if (status == null || status.type === 'revert') return;
 
-		const continuePausedOperation = this.container.git.status(status.repoPath).continuePausedOperation;
+		const continuePausedOperation = this.repository.git.status().continuePausedOperation;
 		if (continuePausedOperation == null) return;
 
 		try {
@@ -3351,10 +3350,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private async openRebaseEditor(_item?: GraphItemContext) {
 		if (this.repository == null) return;
 
-		const status = await this.container.git.status(this.repository.path).getPausedOperationStatus?.();
+		const status = await this.repository.git.status().getPausedOperationStatus?.();
 		if (status == null || status.type !== 'rebase') return;
 
-		const gitDir = await this.container.git.getGitDir(this.repository.path);
+		const gitDir = await this.repository.git.config().getGitDir?.();
 		if (gitDir == null) return;
 
 		const rebaseTodoUri = Uri.joinPath(gitDir.uri, 'rebase-merge', 'git-rebase-todo');
@@ -3381,7 +3380,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private copyDeepLinkToBranch(item?: GraphItemContext) {
 		if (isGraphItemRefContext(item, 'branch')) {
 			const { ref } = item.webviewItemValue;
-			return executeCommand<CopyDeepLinkCommandArgs>(GlCommand.CopyDeepLinkToBranch, { refOrRepoPath: ref });
+			return executeCommand<CopyDeepLinkCommandArgs>('gitlens.copyDeepLinkToBranch', { refOrRepoPath: ref });
 		}
 
 		return Promise.resolve();
@@ -3392,7 +3391,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const ref = this.getGraphItemRef(item, 'revision');
 		if (ref == null) return Promise.resolve();
 
-		return executeCommand<CopyDeepLinkCommandArgs>(GlCommand.CopyDeepLinkToCommit, { refOrRepoPath: ref });
+		return executeCommand<CopyDeepLinkCommandArgs>('gitlens.copyDeepLinkToCommit', { refOrRepoPath: ref });
 	}
 
 	@log()
@@ -3401,7 +3400,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			const { ref } = item.webviewItemValue;
 			if (!ref.remote) return Promise.resolve();
 
-			return executeCommand<CopyDeepLinkCommandArgs>(GlCommand.CopyDeepLinkToRepo, {
+			return executeCommand<CopyDeepLinkCommandArgs>('gitlens.copyDeepLinkToRepo', {
 				refOrRepoPath: ref.repoPath,
 				remote: getRemoteNameFromBranchName(ref.name),
 			});
@@ -3414,7 +3413,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	private copyDeepLinkToTag(item?: GraphItemContext) {
 		if (isGraphItemRefContext(item, 'tag')) {
 			const { ref } = item.webviewItemValue;
-			return executeCommand<CopyDeepLinkCommandArgs>(GlCommand.CopyDeepLinkToTag, { refOrRepoPath: ref });
+			return executeCommand<CopyDeepLinkCommandArgs>('gitlens.copyDeepLinkToTag', { refOrRepoPath: ref });
 		}
 
 		return Promise.resolve();
@@ -3818,7 +3817,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	}
 
 	@log()
-	generateCommitMessage(item?: GraphItemContext) {
+	private generateCommitMessage(item?: GraphItemContext) {
 		const ref = this.getGraphItemRef(item);
 		if (ref == null) return Promise.resolve();
 
@@ -3841,10 +3840,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const commit = await this.getCommitFromGraphItemRef(item);
 		if (commit == null) return;
 
-		if (individually) {
-			return openAllChangesIndividually(commit);
-		}
-		return openAllChanges(commit);
+		return openCommitChanges(this.container, commit, individually);
 	}
 
 	@log()
@@ -3852,10 +3848,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const commit = await this.getCommitFromGraphItemRef(item);
 		if (commit == null) return;
 
-		if (individually) {
-			return openAllChangesWithWorkingIndividually(commit);
-		}
-		return openAllChangesWithWorking(commit);
+		return openCommitChangesWithWorking(this.container, commit, individually);
 	}
 
 	@log()
@@ -3886,10 +3879,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				if (remoteUrl != null) {
 					const deepLink = getPullRequestBranchDeepLink(
 						this.container,
+						pr,
 						branch.getNameWithoutRemote(),
 						remoteUrl,
 						DeepLinkActionType.SwitchToPullRequestWorktree,
-						pr,
 					);
 
 					return this.container.deepLinks.processDeepLinkUri(deepLink, false, repo);
@@ -4227,6 +4220,11 @@ function toGraphIssueTrackerType(id: string): GraphIssueTrackerType | undefined 
 			return 'gitlab';
 		case IssueIntegrationId.Jira:
 			return 'jiraCloud';
+		case HostingIntegrationId.AzureDevOps:
+		case 'azure':
+		case 'azure-devops':
+			// TODO: Remove the casting once this is officially recognized by the component
+			return 'azureDevops' as GraphIssueTrackerType;
 		default:
 			return undefined;
 	}

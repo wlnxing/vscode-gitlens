@@ -86,7 +86,7 @@ export class BranchTrackingStatusNode
 			const ref = this.options?.unpublishedCommits != null ? last(this.options.unpublishedCommits) : undefined;
 			if (ref == null) return undefined;
 
-			const resolved = await this.view.container.git.resolveReference(this.repoPath, `${ref}^`);
+			const resolved = await this.view.container.git.refs(this.repoPath).resolveReference(`${ref}^`);
 			return {
 				...comparison,
 				ref1: resolved,
@@ -332,7 +332,7 @@ export class BranchTrackingStatusNode
 
 	@gate()
 	@debug()
-	override refresh(reset?: boolean) {
+	override refresh(reset?: boolean): void {
 		if (reset) {
 			this._log = undefined;
 		}
@@ -356,12 +356,12 @@ export class BranchTrackingStatusNode
 		return this._log;
 	}
 
-	get hasMore() {
+	get hasMore(): boolean {
 		return this._log?.hasMore ?? true;
 	}
 
 	@gate()
-	async loadMore(limit?: number | { until?: any }) {
+	async loadMore(limit?: number | { until?: any }): Promise<void> {
 		let log = await window.withProgress(
 			{
 				location: { viewId: this.view.id },

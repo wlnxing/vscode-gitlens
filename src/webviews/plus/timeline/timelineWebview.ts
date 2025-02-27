@@ -1,6 +1,5 @@
 import { Disposable, Uri, window } from 'vscode';
 import { proBadge } from '../../../constants';
-import { GlCommand } from '../../../constants.commands';
 import type { TimelineShownTelemetryContext, TimelineTelemetryContext } from '../../../constants.telemetry';
 import type { Container } from '../../../container';
 import type { CommitSelectedEvent, FileSelectedEvent } from '../../../eventBus';
@@ -13,16 +12,16 @@ import { getChangedFilesCount } from '../../../git/utils/commit.utils';
 import type { SubscriptionChangeEvent } from '../../../plus/gk/subscriptionService';
 import { executeCommand, registerCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
-import { getTabUri, isFolderUri } from '../../../system/-webview/utils';
+import { isFolderUri } from '../../../system/-webview/path';
+import { getTabUri } from '../../../system/-webview/vscode';
 import { createFromDateDelta } from '../../../system/date';
 import { debug } from '../../../system/decorators/log';
-import type { Deferrable } from '../../../system/function';
-import { debounce } from '../../../system/function';
+import type { Deferrable } from '../../../system/function/debounce';
+import { debounce } from '../../../system/function/debounce';
 import { filter } from '../../../system/iterable';
 import { flatten } from '../../../system/object';
 import { getSettledValue } from '../../../system/promise';
-import { isViewFileNode } from '../../../views/nodes/abstract/viewFileNode';
-import { isViewNode } from '../../../views/nodes/abstract/viewNode';
+import { isViewFileOrFolderNode } from '../../../views/nodes/utils/-webview/node.utils';
 import type { IpcMessage } from '../../protocol';
 import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../../webviewProvider';
 import type { WebviewShowOptions } from '../../webviewsController';
@@ -79,7 +78,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -94,7 +93,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		if (arg != null) {
 			if (arg instanceof Uri) {
 				uri = arg;
-			} else if (isViewFileNode(arg)) {
+			} else if (isViewFileOrFolderNode(arg)) {
 				uri = arg.uri;
 			} else if (isSerializedState<State>(arg) && arg.state.uri != null) {
 				uri = Uri.parse(arg.state.uri);
@@ -127,7 +126,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		if (arg != null) {
 			if (arg instanceof Uri) {
 				uri = arg;
-			} else if (isViewNode(arg) && (arg.type === 'folder' || isViewFileNode(arg))) {
+			} else if (isViewFileOrFolderNode(arg)) {
 				uri = arg.uri;
 			} else if (isSerializedState<State>(arg)) {
 				this._context.period = arg.state.period;
@@ -169,7 +168,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 					() => {
 						if (this._context.uri == null) return;
 
-						void executeCommand(GlCommand.ShowFileInTimeline, this._context.uri);
+						void executeCommand('gitlens.showFileInTimeline', this._context.uri);
 						this.container.telemetry.sendEvent('timeline/action/openInEditor', this.getTelemetryContext());
 					},
 					this,
@@ -180,7 +179,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		return commands;
 	}
 
-	onVisibilityChanged(visible: boolean) {
+	onVisibilityChanged(visible: boolean): void {
 		if (!visible) return;
 
 		if (this.host.isHost('view')) {
@@ -188,7 +187,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 	}
 
-	async onMessageReceived(e: IpcMessage) {
+	async onMessageReceived(e: IpcMessage): Promise<void> {
 		switch (true) {
 			case OpenDataPointCommand.is(e): {
 				if (e.params.data == null || !e.params.data.selected || this._context.uri == null) return;
@@ -239,7 +238,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		}
 	}
 
-	@debug()
+	@debug({ args: false })
 	private onTabsChanged() {
 		this.updateUri(this.activeTabUri);
 	}
@@ -350,7 +349,7 @@ export class TimelineWebviewProvider implements WebviewProvider<State, State, Ti
 		const repoPath = gitUri.repoPath!;
 
 		const [currentUserResult, logResult] = await Promise.allSettled([
-			this.container.git.getCurrentUser(repoPath),
+			this.container.git.config(repoPath).getCurrentUser(),
 			this.container.git.commits(repoPath).getLogForFile(gitUri.fsPath, gitUri.sha, {
 				limit: 0,
 				since: getPeriodDate(period)?.toISOString(),

@@ -51,8 +51,10 @@ export class CommandMessageNode extends MessageNode {
 		description?: string,
 		tooltip?: string,
 		iconPath?: TreeItem['iconPath'],
+		contextValue?: string,
+		resourceUri?: Uri,
 	) {
-		super(view, parent, message, description, tooltip, iconPath);
+		super(view, parent, message, description, tooltip, iconPath, contextValue, resourceUri);
 	}
 
 	override getTreeItem(): TreeItem | Promise<TreeItem> {
@@ -84,7 +86,7 @@ export abstract class PagerNode extends ViewNode<'pager'> {
 		super('pager', unknownGitUri, view, parent);
 	}
 
-	async loadAll() {
+	async loadAll(): Promise<void> {
 		const count = (await this.options?.getCount?.()) ?? 0;
 		return this.view.loadMoreNodeChildren(
 			this.parent! as ViewNode & PageableViewNode,
@@ -94,7 +96,7 @@ export abstract class PagerNode extends ViewNode<'pager'> {
 		);
 	}
 
-	loadMore() {
+	loadMore(): Promise<void> {
 		return this.view.loadMoreNodeChildren(
 			this.parent! as ViewNode & PageableViewNode,
 			this.options?.pageSize ?? configuration.get('views.pageItemLimit'),

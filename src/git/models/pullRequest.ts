@@ -1,8 +1,8 @@
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import { Container } from '../../container';
 import { formatDate, fromNow } from '../../system/date';
 import { memoize } from '../../system/decorators/-webview/memoize';
-import type { IssueRepository } from './issue';
+import type { IssueProject, IssueRepository } from './issue';
 import type { IssueOrPullRequest, IssueOrPullRequestState as PullRequestState } from './issueOrPullRequest';
 import type { ProviderReference } from './remoteProvider';
 import type { RepositoryIdentityDescriptor } from './repositoryIdentities';
@@ -24,6 +24,7 @@ export interface PullRequestShape extends IssueOrPullRequest {
 	readonly reviewDecision?: PullRequestReviewDecision;
 	readonly reviewRequests?: PullRequestReviewer[];
 	readonly assignees?: PullRequestMember[];
+	readonly project?: IssueProject;
 }
 
 export class PullRequest implements PullRequestShape {
@@ -55,6 +56,7 @@ export class PullRequest implements PullRequestShape {
 		public readonly latestReviews?: PullRequestReviewer[],
 		public readonly assignees?: PullRequestMember[],
 		public readonly statusCheckRollupState?: PullRequestStatusCheckRollupState,
+		public readonly project?: IssueProject,
 	) {}
 
 	get closed(): boolean {
@@ -68,42 +70,42 @@ export class PullRequest implements PullRequestShape {
 	}
 
 	@memoize<PullRequest['formatDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatDate(format?: string | null) {
+	formatDate(format?: string | null): string {
 		return formatDate(this.mergedDate ?? this.closedDate ?? this.updatedDate, format ?? 'MMMM Do, YYYY h:mma');
 	}
 
-	formatDateFromNow() {
+	formatDateFromNow(): string {
 		return fromNow(this.mergedDate ?? this.closedDate ?? this.updatedDate);
 	}
 
 	@memoize<PullRequest['formatClosedDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatClosedDate(format?: string | null) {
+	formatClosedDate(format?: string | null): string {
 		if (this.closedDate == null) return '';
 		return formatDate(this.closedDate, format ?? 'MMMM Do, YYYY h:mma');
 	}
 
-	formatClosedDateFromNow() {
+	formatClosedDateFromNow(): string {
 		if (this.closedDate == null) return '';
 		return fromNow(this.closedDate);
 	}
 
 	@memoize<PullRequest['formatMergedDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatMergedDate(format?: string | null) {
+	formatMergedDate(format?: string | null): string {
 		if (this.mergedDate == null) return '';
 		return formatDate(this.mergedDate, format ?? 'MMMM Do, YYYY h:mma') ?? '';
 	}
 
-	formatMergedDateFromNow() {
+	formatMergedDateFromNow(): string {
 		if (this.mergedDate == null) return '';
 		return fromNow(this.mergedDate);
 	}
 
 	@memoize<PullRequest['formatUpdatedDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatUpdatedDate(format?: string | null) {
+	formatUpdatedDate(format?: string | null): string {
 		return formatDate(this.updatedDate, format ?? 'MMMM Do, YYYY h:mma') ?? '';
 	}
 
-	formatUpdatedDateFromNow() {
+	formatUpdatedDateFromNow(): string {
 		return fromNow(this.updatedDate);
 	}
 }
@@ -118,6 +120,8 @@ export const enum PullRequestMergeableState {
 	Unknown = 'Unknown',
 	Mergeable = 'Mergeable',
 	Conflicting = 'Conflicting',
+	FailingChecks = 'FailingChecks',
+	BlockedByPolicy = 'BlockedByPolicy',
 }
 
 export const enum PullRequestStatusCheckRollupState {
@@ -181,8 +185,3 @@ export type PullRequestRepositoryIdentityDescriptor = RequireSomeWithProps<
 	'id' | 'domain' | 'repoDomain' | 'repoName'
 > &
 	RequireSomeWithProps<RequireSome<RepositoryIdentityDescriptor<string>, 'remote'>, 'remote', 'domain'>;
-
-export interface SearchedPullRequest {
-	pullRequest: PullRequest;
-	reasons: string[];
-}

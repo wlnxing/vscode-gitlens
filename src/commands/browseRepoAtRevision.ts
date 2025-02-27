@@ -4,7 +4,7 @@ import type { Container } from '../container';
 import { GitUri } from '../git/gitUri';
 import { showGenericErrorMessage } from '../messages';
 import { command, executeCoreCommand } from '../system/-webview/command';
-import { openWorkspace } from '../system/-webview/utils';
+import { openWorkspace } from '../system/-webview/vscode';
 import { Logger } from '../system/logger';
 import { basename } from '../system/path';
 import { ActiveEditorCommand } from './commandBase';
@@ -29,7 +29,7 @@ export class BrowseRepoAtRevisionCommand extends ActiveEditorCommand {
 		]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: BrowseRepoAtRevisionCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: BrowseRepoAtRevisionCommandArgs): Promise<void> {
 		switch (context.command) {
 			case GlCommand.BrowseRepoAtRevisionInNewWindow:
 				args = { ...args, before: false, openInNewWindow: true };
@@ -45,7 +45,7 @@ export class BrowseRepoAtRevisionCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor: TextEditor | undefined, uri?: Uri, args?: BrowseRepoAtRevisionCommandArgs) {
+	async execute(editor: TextEditor | undefined, uri?: Uri, args?: BrowseRepoAtRevisionCommandArgs): Promise<void> {
 		args = { ...args };
 
 		try {
@@ -60,7 +60,7 @@ export class BrowseRepoAtRevisionCommand extends ActiveEditorCommand {
 			if (gitUri.sha == null) return;
 
 			const sha = args?.before
-				? await this.container.git.resolveReference(gitUri.repoPath!, `${gitUri.sha}^`)
+				? await this.container.git.refs(gitUri.repoPath!).resolveReference(`${gitUri.sha}^`)
 				: gitUri.sha;
 			uri = this.container.git.getRevisionUri(sha, gitUri.repoPath!, gitUri.repoPath!);
 			gitUri = GitUri.fromRevisionUri(uri);

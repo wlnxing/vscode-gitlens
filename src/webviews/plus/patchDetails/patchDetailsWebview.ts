@@ -41,14 +41,14 @@ import { ReferencesQuickPickIncludes, showReferencePicker } from '../../../quick
 import { executeCommand, registerCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { getContext, onDidChangeContext, setContext } from '../../../system/-webview/context';
-import type { Serialized } from '../../../system/-webview/serialize';
-import { serialize } from '../../../system/-webview/serialize';
 import { gate } from '../../../system/decorators/-webview/gate';
 import { debug } from '../../../system/decorators/log';
-import type { Deferrable } from '../../../system/function';
-import { debounce } from '../../../system/function';
+import type { Deferrable } from '../../../system/function/debounce';
+import { debounce } from '../../../system/function/debounce';
 import { find, some } from '../../../system/iterable';
 import { basename } from '../../../system/path';
+import type { Serialized } from '../../../system/serialize';
+import { serialize } from '../../../system/serialize';
 import { showInspectView } from '../../commitDetails/actions';
 import type { IpcCallMessageType, IpcMessage } from '../../protocol';
 import type { WebviewHost, WebviewProvider } from '../../webviewProvider';
@@ -159,7 +159,7 @@ export class PatchDetailsWebviewProvider
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -230,7 +230,7 @@ export class PatchDetailsWebviewProvider
 		return commands;
 	}
 
-	onMessageReceived(e: IpcMessage) {
+	onMessageReceived(e: IpcMessage): void {
 		switch (true) {
 			case ApplyPatchCommand.is(e):
 				void this.applyPatch(e.params);
@@ -332,7 +332,7 @@ export class PatchDetailsWebviewProvider
 		this.updateState(true);
 	}
 
-	onVisibilityChanged(visible: boolean) {
+	onVisibilityChanged(visible: boolean): void {
 		// TODO@eamodio ugly -- clean this up later
 		this._context.create?.changes.forEach(c => (visible ? c.resume() : c.suspend()));
 
@@ -825,9 +825,7 @@ export class PatchDetailsWebviewProvider
 			const commit = await this.getOrCreateCommitForPatch(patch.gkRepositoryId);
 			if (commit == null) throw new Error('Unable to find commit');
 
-			const result = await (
-				await this.container.ai
-			)?.explainCommit(
+			const result = await this.container.ai.explainCommit(
 				commit,
 				{ source: 'patchDetails', type: `draft-${this._context.draft.type}` },
 				{ progress: { location: { viewId: this.host.id } } },
@@ -869,9 +867,7 @@ export class PatchDetailsWebviewProvider
 			// const commit = await this.getOrCreateCommitForPatch(patch.gkRepositoryId);
 			// if (commit == null) throw new Error('Unable to find commit');
 
-			const message = await (
-				await this.container.ai
-			)?.generateDraftMessage(
+			const message = await this.container.ai.generateDraftMessage(
 				repo,
 				{ source: 'patchDetails', type: 'patch' },
 				{ progress: { location: { viewId: this.host.id } } },

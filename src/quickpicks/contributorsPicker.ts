@@ -8,8 +8,8 @@ import type { Repository } from '../git/models/repository';
 import type { ContributorQuickPickItem } from '../git/utils/-webview/contributor.quickpick';
 import { createContributorQuickPickItem } from '../git/utils/-webview/contributor.quickpick';
 import { sortContributors } from '../git/utils/-webview/sorting';
-import { getQuickPickIgnoreFocusOut } from '../system/-webview/utils';
-import { debounce } from '../system/function';
+import { getQuickPickIgnoreFocusOut } from '../system/-webview/vscode';
+import { debounce } from '../system/function/debounce';
 import { defer } from '../system/promise';
 import { pad, truncate } from '../system/string';
 

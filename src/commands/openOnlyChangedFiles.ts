@@ -5,10 +5,10 @@ import type { Container } from '../container';
 import { showGenericErrorMessage } from '../messages';
 import { getRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
 import { command } from '../system/-webview/command';
-import { findOrOpenEditors } from '../system/-webview/utils';
+import { findOrOpenEditors } from '../system/-webview/vscode';
 import { filterMap } from '../system/array';
-import { UriComparer } from '../system/comparers';
 import { Logger } from '../system/logger';
+import { uriEquals } from '../system/uri';
 import { GlCommandBase } from './commandBase';
 
 export interface OpenOnlyChangedFilesCommandArgs {
@@ -21,7 +21,7 @@ export class OpenOnlyChangedFilesCommand extends GlCommandBase {
 		super(GlCommand.OpenOnlyChangedFiles);
 	}
 
-	async execute(args?: OpenOnlyChangedFilesCommandArgs) {
+	async execute(args?: OpenOnlyChangedFilesCommandArgs): Promise<void> {
 		args = { ...args };
 
 		try {
@@ -65,7 +65,7 @@ export class OpenOnlyChangedFilesCommand extends GlCommandBase {
 
 					if (inputUri == null) continue;
 					// eslint-disable-next-line no-loop-func
-					matchingUri = args.uris.find(uri => UriComparer.equals(uri, inputUri));
+					matchingUri = args.uris.find(uri => uriEquals(uri, inputUri));
 					if (matchingUri != null) {
 						openUris.delete(matchingUri);
 					} else {

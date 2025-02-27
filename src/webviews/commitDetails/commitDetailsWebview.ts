@@ -1,13 +1,12 @@
-import { EntityIdentifierUtils } from '@gitkraken/provider-apis';
+import { EntityIdentifierUtils } from '@gitkraken/provider-apis/entity-identifiers';
 import type { CancellationToken, ConfigurationChangeEvent, TextDocumentShowOptions } from 'vscode';
 import { CancellationTokenSource, Disposable, env, Uri, window } from 'vscode';
-import type { MaybeEnrichedAutolink } from '../../autolinks';
-import { serializeAutolink } from '../../autolinks';
+import type { MaybeEnrichedAutolink } from '../../autolinks/models/autolinks';
+import { serializeAutolink } from '../../autolinks/utils/-webview/autolinks.utils';
 import { getAvatarUri } from '../../avatars';
 import type { CopyMessageToClipboardCommandArgs } from '../../commands/copyMessageToClipboard';
 import type { CopyShaToClipboardCommandArgs } from '../../commands/copyShaToClipboard';
 import type { OpenPullRequestOnRemoteCommandArgs } from '../../commands/openPullRequestOnRemote';
-import { GlCommand } from '../../constants.commands';
 import type { ContextKeys } from '../../constants.context';
 import { IssueIntegrationId } from '../../constants.integrations';
 import type { InspectTelemetryContext, Sources } from '../../constants.telemetry';
@@ -47,6 +46,7 @@ import type { Subscription } from '../../plus/gk/models/subscription';
 import type { SubscriptionChangeEvent } from '../../plus/gk/subscriptionService';
 import { ensureAccount } from '../../plus/gk/utils/-webview/acount.utils';
 import type { ConnectionStateChangeEvent } from '../../plus/integrations/integrationService';
+import { supportsCodeSuggest } from '../../plus/integrations/providers/models';
 import { getEntityIdentifierInput } from '../../plus/integrations/providers/utils';
 import {
 	executeCommand,
@@ -56,16 +56,16 @@ import {
 } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
 import { getContext, onDidChangeContext } from '../../system/-webview/context';
-import type { Serialized } from '../../system/-webview/serialize';
-import { serialize } from '../../system/-webview/serialize';
 import { debug } from '../../system/decorators/log';
-import type { Deferrable } from '../../system/function';
-import { debounce } from '../../system/function';
+import type { Deferrable } from '../../system/function/debounce';
+import { debounce } from '../../system/function/debounce';
 import { filterMap, map } from '../../system/iterable';
 import { Logger } from '../../system/logger';
 import { getLogScope } from '../../system/logger.scope';
 import { MRU } from '../../system/mru';
 import { getSettledValue, pauseOnCancelOrTimeoutMapTuplePromise } from '../../system/promise';
+import type { Serialized } from '../../system/serialize';
+import { serialize } from '../../system/serialize';
 import type { LinesChangeEvent } from '../../trackers/lineTracker';
 import type { ShowInCommitGraphCommandArgs } from '../plus/graph/protocol';
 import type { Change } from '../plus/patchDetails/protocol';
@@ -154,6 +154,7 @@ interface Context {
 	preferences: Preferences;
 
 	commit: GitCommit | undefined;
+	autolinksEnabled: boolean;
 	richStateLoaded: boolean;
 	formattedMessage: string | undefined;
 	autolinkedIssues: IssueOrPullRequest[] | undefined;
@@ -195,6 +196,7 @@ export class CommitDetailsWebviewProvider
 			preferences: this.getPreferences(),
 
 			commit: undefined,
+			autolinksEnabled: false,
 			richStateLoaded: false,
 			formattedMessage: undefined,
 			autolinkedIssues: undefined,
@@ -213,7 +215,7 @@ export class CommitDetailsWebviewProvider
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 		this._lineTrackerDisposable?.dispose();
 		this._repositorySubscription?.subscription.dispose();
@@ -367,7 +369,7 @@ export class CommitDetailsWebviewProvider
 		return true;
 	}
 
-	async trackOpenReviewMode(source?: Sources) {
+	async trackOpenReviewMode(source?: Sources): Promise<void> {
 		if (this._context.wip?.pullRequest == null) return;
 
 		const provider = this._context.wip.pullRequest.provider.id;
@@ -405,7 +407,7 @@ export class CommitDetailsWebviewProvider
 		}
 	}
 
-	onMessageReceived(e: IpcMessage) {
+	onMessageReceived(e: IpcMessage): void {
 		switch (true) {
 			case OpenFileOnRemoteCommand.is(e):
 				void this.openFileOnRemote(e.params);
@@ -448,8 +450,8 @@ export class CommitDetailsWebviewProvider
 
 						void executeCommand<ShowInCommitGraphCommandArgs>(
 							this.options.attachedTo === 'graph'
-								? GlCommand.ShowInCommitGraphView
-								: GlCommand.ShowInCommitGraph,
+								? 'gitlens.showInCommitGraphView'
+								: 'gitlens.showInCommitGraph',
 							{ ref: ref },
 						);
 						break;
@@ -466,7 +468,7 @@ export class CommitDetailsWebviewProvider
 						if (this._context.commit != null) {
 							if (e.params.alt) {
 								void executeCommand<CopyMessageToClipboardCommandArgs>(
-									GlCommand.CopyMessageToClipboard,
+									'gitlens.copyMessageToClipboard',
 									{
 										message: this._context.commit.message,
 									},
@@ -474,7 +476,7 @@ export class CommitDetailsWebviewProvider
 							} else if (isStash(this._context.commit)) {
 								void env.clipboard.writeText(this._context.commit.stashName);
 							} else {
-								void executeCommand<CopyShaToClipboardCommandArgs>(GlCommand.CopyShaToClipboard, {
+								void executeCommand<CopyShaToClipboardCommandArgs>('gitlens.copyShaToClipboard', {
 									sha: this._context.commit.sha,
 								});
 							}
@@ -800,7 +802,7 @@ export class CommitDetailsWebviewProvider
 		const {
 			pr: { url },
 		} = this.pullRequestContext;
-		return executeCommand<OpenPullRequestOnRemoteCommandArgs, void>(GlCommand.OpenPullRequestOnRemote, {
+		return executeCommand<OpenPullRequestOnRemoteCommandArgs, void>('gitlens.openPullRequestOnRemote', {
 			pr: { url: url },
 			clipboard: clipboard,
 		});
@@ -833,7 +835,7 @@ export class CommitDetailsWebviewProvider
 		void this.notifyDidChangeState(true);
 	}
 
-	onVisibilityChanged(visible: boolean) {
+	onVisibilityChanged(visible: boolean): void {
 		this.ensureTrackers();
 		if (!visible) return;
 
@@ -892,7 +894,7 @@ export class CommitDetailsWebviewProvider
 		this.updateHasAccount(e.current);
 	}
 
-	updateHasAccount(subscription: Subscription) {
+	private updateHasAccount(subscription: Subscription) {
 		const hasAccount = subscription.account != null;
 		if (this._context.hasAccount === hasAccount) return;
 
@@ -900,7 +902,7 @@ export class CommitDetailsWebviewProvider
 		void this.host.notify(DidChangeHasAccountNotification, { hasAccount: hasAccount });
 	}
 
-	onIntegrationConnectionStateChanged(e: ConnectionStateChangeEvent) {
+	private onIntegrationConnectionStateChanged(e: ConnectionStateChangeEvent) {
 		if (e.key === 'jira') {
 			const hasConnectedJira = e.reason === 'connected';
 			if (this._context.hasConnectedJira === hasConnectedJira) return;
@@ -1124,9 +1126,7 @@ export class CommitDetailsWebviewProvider
 	private async explainRequest<T extends typeof ExplainRequest>(requestType: T, msg: IpcCallMessageType<T>) {
 		let params: DidExplainParams;
 		try {
-			const result = await (
-				await this.container.ai
-			)?.explainCommit(
+			const result = await this.container.ai.explainCommit(
 				this._context.commit!,
 				{ source: 'inspect', type: isStash(this._context.commit) ? 'stash' : 'commit' },
 				{ progress: { location: { viewId: this.host.id } } },
@@ -1160,9 +1160,7 @@ export class CommitDetailsWebviewProvider
 			// const commit = await this.getOrCreateCommitForPatch(patch.gkRepositoryId);
 			// if (commit == null) throw new Error('Unable to find commit');
 
-			const message = await (
-				await this.container.ai
-			)?.generateDraftMessage(
+			const message = await this.container.ai.generateDraftMessage(
 				repo,
 				{ source: 'inspect', type: 'suggested_pr_change' },
 				{ progress: { location: { viewId: this.host.id } } },
@@ -1240,6 +1238,7 @@ export class CommitDetailsWebviewProvider
 			pinned: current.pinned,
 			preferences: current.preferences,
 			includeRichContent: current.richStateLoaded,
+			autolinksEnabled: current.autolinksEnabled,
 			autolinkedIssues: current.autolinkedIssues?.map(serializeIssueOrPullRequest),
 			pullRequest: current.pullRequest != null ? serializePullRequest(current.pullRequest) : undefined,
 			wip: serializeWipContext(wip),
@@ -1342,7 +1341,7 @@ export class CommitDetailsWebviewProvider
 		});
 
 		let codeSuggestions: Draft[] = [];
-		if (pullRequest != null) {
+		if (pullRequest != null && supportsCodeSuggest(pullRequest.provider)) {
 			const results = await this.getCodeSuggestions(pullRequest, repository);
 			if (results.length) {
 				codeSuggestions = results;
@@ -1363,7 +1362,7 @@ export class CommitDetailsWebviewProvider
 	}
 
 	private async getCodeSuggestions(pullRequest: PullRequest, repository: Repository): Promise<Draft[]> {
-		if (!(await this.canAccessDrafts())) return [];
+		if (!(await this.canAccessDrafts()) || !supportsCodeSuggest(pullRequest.provider)) return [];
 
 		const results = await this.container.drafts.getCodeSuggestions(pullRequest, repository);
 
@@ -1391,7 +1390,9 @@ export class CommitDetailsWebviewProvider
 		const wip = this._context.wip;
 		const { pullRequest, repo } = wip;
 
-		wip.codeSuggestions = await this.getCodeSuggestions(pullRequest!, repo);
+		wip.codeSuggestions = supportsCodeSuggest(pullRequest!.provider)
+			? await this.getCodeSuggestions(pullRequest!, repo)
+			: [];
 
 		if (this._pendingContext == null) {
 			const success = await this.host.notify(
@@ -1419,10 +1420,10 @@ export class CommitDetailsWebviewProvider
 
 		if (cancellation.isCancellationRequested) return;
 
+		const autolinksEnabled = configuration.get('views.commitDetails.autolinks.enabled');
 		const [enrichedAutolinksResult, prResult] =
-			remote?.provider != null
+			remote?.provider != null && autolinksEnabled
 				? await Promise.allSettled([
-						configuration.get('views.commitDetails.autolinks.enabled') &&
 						configuration.get('views.commitDetails.autolinks.enhanced')
 							? pauseOnCancelOrTimeoutMapTuplePromise(commit.getEnrichedAutolinks(remote))
 							: undefined,
@@ -1440,6 +1441,7 @@ export class CommitDetailsWebviewProvider
 		const formattedMessage = this.getFormattedMessage(commit, remote, enrichedAutolinks);
 
 		this.updatePendingContext({
+			autolinksEnabled: autolinksEnabled,
 			richStateLoaded: true,
 			formattedMessage: formattedMessage,
 			autolinkedIssues:

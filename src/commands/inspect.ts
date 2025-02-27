@@ -36,10 +36,10 @@ export class InspectCommand extends ActiveEditorCommand {
 	}
 
 	constructor(private readonly container: Container) {
-		super([GlCommand.ShowCommitInView, GlCommand.ShowInDetailsView, GlCommand.ShowLineCommitInView]);
+		super([GlCommand.ShowCommitInView, GlCommand.ShowInDetailsView, 'gitlens.showLineCommitInView']);
 	}
 
-	protected override preExecute(context: CommandContext, args?: InspectCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: InspectCommandArgs): Promise<void> {
 		if (context.type === 'viewItem') {
 			args = { ...args };
 			if (isCommandContextViewNodeHasCommit(context)) {
@@ -50,7 +50,7 @@ export class InspectCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: InspectCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: InspectCommandArgs): Promise<void> {
 		args = { ...args };
 
 		if (args.ref == null) {

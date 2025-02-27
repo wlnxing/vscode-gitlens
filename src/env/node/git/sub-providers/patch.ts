@@ -1,5 +1,3 @@
-import { promises as fs } from 'fs';
-import { tmpdir } from 'os';
 import { window } from 'vscode';
 import type { Container } from '../../../../container';
 import { CancellationError } from '../../../../errors';
@@ -17,8 +15,8 @@ import type { GitCommit } from '../../../../git/models/commit';
 import { log } from '../../../../system/decorators/log';
 import { Logger } from '../../../../system/logger';
 import { getLogScope } from '../../../../system/logger.scope';
-import { joinPaths } from '../../../../system/path';
 import type { Git } from '../git';
+import { gitLogDefaultConfigs } from '../git';
 import type { LocalGitProvider } from '../localGitProvider';
 
 export class PatchGitSubProvider implements GitPatchSubProvider {
@@ -175,46 +173,21 @@ export class PatchGitSubProvider implements GitPatchSubProvider {
 		}
 
 		// Create a temporary index file
-		const tempDir = await fs.mkdtemp(joinPaths(tmpdir(), 'gl-'));
-		const tempIndex = joinPaths(tempDir, 'index');
+		await using disposableIndex = await this.provider.staging!.createTemporaryIndex(repoPath, baseRef);
+		const { env } = disposableIndex;
 
 		try {
-			// Tell Git to use our soon to be created index file
-			const env = { GIT_INDEX_FILE: tempIndex };
-
-			// Create the temp index file from a base ref/sha
-
-			// Get the tree of the base
-			const newIndex = await this.git.exec<string>(
-				{
-					cwd: repoPath,
-					env: env,
-				},
-				'ls-tree',
-				'-z',
-				'-r',
-				'--full-name',
-				baseRef,
-			);
-
-			// Write the tree to our temp index
-			await this.git.exec<string>(
-				{
-					cwd: repoPath,
-					env: env,
-					stdin: newIndex,
-				},
-				'update-index',
-				'-z',
-				'--index-info',
-			);
-
 			// Apply the patch to our temp index, without touching the working directory
-			await this.git.apply2(repoPath, { env: env, stdin: contents }, '--cached');
+			await this.git.exec(
+				{ cwd: repoPath, configs: gitLogDefaultConfigs, env: env, stdin: contents },
+				'apply',
+				'--cached',
+				'-',
+			);
 
 			// Create a new tree from our patched index
 			const tree = (
-				await this.git.exec<string>(
+				await this.git.exec(
 					{
 						cwd: repoPath,
 						env: env,
@@ -225,7 +198,7 @@ export class PatchGitSubProvider implements GitPatchSubProvider {
 
 			// Create new commit from the tree
 			const sha = (
-				await this.git.exec<string>(
+				await this.git.exec(
 					{
 						cwd: repoPath,
 						env: env,
@@ -245,20 +218,18 @@ export class PatchGitSubProvider implements GitPatchSubProvider {
 			debugger;
 
 			throw ex;
-		} finally {
-			// Delete the temporary index file
-			try {
-				await fs.rm(tempDir, { recursive: true });
-			} catch (_ex) {
-				debugger;
-			}
 		}
 	}
 
 	@log({ args: { 1: false } })
 	async validatePatch(repoPath: string | undefined, contents: string): Promise<boolean> {
 		try {
-			await this.git.apply2(repoPath!, { stdin: contents }, '--check');
+			await this.git.exec(
+				{ cwd: repoPath, configs: gitLogDefaultConfigs, stdin: contents },
+				'apply',
+				'--check',
+				'-',
+			);
 			return true;
 		} catch (ex) {
 			if (ex instanceof Error && ex.message) {

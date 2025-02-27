@@ -1,9 +1,9 @@
 /*global window */
-import type { Serialized } from '../../../system/-webview/serialize';
 import { getScopedCounter } from '../../../system/counter';
 import { debug, logName } from '../../../system/decorators/log';
 import { Logger } from '../../../system/logger';
 import { getLogScope, getNewLogScope } from '../../../system/logger.scope';
+import type { Serialized } from '../../../system/serialize';
 import { maybeStopWatch } from '../../../system/stopwatch';
 import type { IpcCallParamsType, IpcCallResponseParamsType, IpcCommand, IpcMessage, IpcRequest } from '../../protocol';
 import { ipcPromiseSettled, isIpcPromise } from '../../protocol';
@@ -20,7 +20,7 @@ export interface HostIpcApi {
 declare function acquireVsCodeApi(): HostIpcApi;
 
 let _api: HostIpcApi | undefined;
-export function getHostIpcApi() {
+export function getHostIpcApi(): HostIpcApi {
 	return (_api ??= acquireVsCodeApi());
 }
 
@@ -48,7 +48,7 @@ export class HostIpc implements Disposable {
 		this._disposable = DOM.on(window, 'message', e => this.onMessageReceived(e));
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -80,7 +80,7 @@ export class HostIpc implements Disposable {
 		this._onReceiveMessage.fire(msg);
 	}
 
-	replaceIpcPromisesWithPromises(data: unknown) {
+	replaceIpcPromisesWithPromises(data: unknown): void {
 		if (data == null || typeof data !== 'object') return;
 
 		for (const key in data) {
@@ -165,8 +165,19 @@ export class HostIpc implements Disposable {
 		return promise;
 	}
 
-	setState<T>(state: Partial<T>) {
+	setPersistedState<T>(state: Partial<T>): void {
 		this._api.setState(state);
+	}
+
+	updatePersistedState<T>(update: Partial<T>): void {
+		let state = this._api.getState() as Partial<T> | undefined;
+		if (state != null && typeof state === 'object') {
+			state = { ...state, ...update };
+			this._api.setState(state);
+		} else {
+			state = update;
+		}
+		this.setPersistedState(state);
 	}
 
 	@debug<HostIpc['postMessage']>({ args: { 0: e => `${e.id}, method=${e.method}` } })

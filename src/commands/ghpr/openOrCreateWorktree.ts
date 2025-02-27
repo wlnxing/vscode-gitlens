@@ -1,6 +1,5 @@
 import type { Uri } from 'vscode';
 import { window } from 'vscode';
-import { GlCommand } from '../../constants.commands';
 import type { Container } from '../../container';
 import { create as createWorktree, open as openWorktree } from '../../git/actions/worktree';
 import type { GitBranchReference } from '../../git/models/reference';
@@ -47,10 +46,10 @@ export interface GHPRPullRequest {
 @command()
 export class OpenOrCreateWorktreeCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(GlCommand.OpenOrCreateWorktreeForGHPR);
+		super('gitlens.ghpr.views.openOrCreateWorktree');
 	}
 
-	async execute(...args: [GHPRPullRequestNode | GHPRPullRequest, ...unknown[]]) {
+	async execute(...args: [GHPRPullRequestNode | GHPRPullRequest, ...unknown[]]): Promise<void> {
 		const [arg] = args;
 		let pr;
 		if ('pullRequestModel' in arg) {
@@ -137,11 +136,12 @@ export class OpenOrCreateWorktreeCommand extends GlCommandBase {
 
 			// Save the PR number in the branch config
 			// https://github.com/Microsoft/vscode-pull-request-github/blob/0c556c48c69a3df2f9cf9a45ed2c40909791b8ab/src/github/pullRequestGitHelper.ts#L18
-			void this.container.git.setConfig(
-				repo.path,
-				`branch.${localBranchName}.github-pr-owner-number`,
-				`${rootOwner}#${rootRepository}#${number}`,
-			);
+			void repo.git
+				.config()
+				.setConfig?.(
+					`branch.${localBranchName}.github-pr-owner-number`,
+					`${rootOwner}#${rootRepository}#${number}`,
+				);
 		} catch (ex) {
 			Logger.error(ex, 'CreateWorktreeCommand', 'Unable to create worktree');
 			void window.showErrorMessage(`Unable to create worktree for ${remoteOwner}:${ref}`);

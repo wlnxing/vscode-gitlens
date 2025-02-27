@@ -31,17 +31,17 @@ export class ShowQuickFileHistoryCommand extends ActiveEditorCachedCommand {
 		super([
 			GlCommand.OpenFileHistory,
 			GlCommand.OpenFolderHistory,
-			GlCommand.ShowQuickFileHistory,
-			GlCommand.QuickOpenFileHistory,
-			GlCommand.Deprecated_ShowFileHistoryInView,
+			'gitlens.showQuickFileHistory',
+			'gitlens.quickOpenFileHistory',
+			/** @deprecated */ 'gitlens.showFileHistoryInView',
 		]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: ShowQuickFileHistoryCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: ShowQuickFileHistoryCommandArgs): Promise<void> {
 		let uri = context.uri;
 		if (
 			context.command === GlCommand.OpenFileHistory ||
-			context.command === GlCommand.Deprecated_ShowFileHistoryInView
+			context.command === /** @deprecated */ 'gitlens.showFileHistoryInView'
 		) {
 			args = { ...args };
 			args.showInSideBar = true;
@@ -56,7 +56,7 @@ export class ShowQuickFileHistoryCommand extends ActiveEditorCachedCommand {
 		return this.execute(context.editor, uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: ShowQuickFileHistoryCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: ShowQuickFileHistoryCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 		if (uri == null) return;
 

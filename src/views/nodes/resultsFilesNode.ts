@@ -199,7 +199,7 @@ export class ResultsFilesNode extends ViewNode<'results-files', ViewsWithCommits
 
 	@gate()
 	@debug()
-	override refresh(reset: boolean = false) {
+	override refresh(reset: boolean = false): void {
 		if (!reset) return;
 
 		this.deleteState('filter');
@@ -244,7 +244,7 @@ export class ResultsFilesNode extends ViewNode<'results-files', ViewsWithCommits
 			.branches(this.repoPath)
 			.getMergeBase(this.ref1 || 'HEAD', this.ref2 || 'HEAD');
 		if (mergeBase != null) {
-			const files = await this.view.container.git.getDiffStatus(this.uri.repoPath!, `${mergeBase}..${ref}`);
+			const files = await this.view.container.git.diff(this.uri.repoPath!).getDiffStatus(`${mergeBase}..${ref}`);
 			if (files != null) {
 				filterTo = new Set<string>(files.map(f => f.path));
 			}

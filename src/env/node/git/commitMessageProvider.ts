@@ -38,7 +38,7 @@ class AICommitMessageProvider implements CommitMessageProvider, Disposable {
 		}
 	}
 
-	dispose() {
+	dispose(): void {
 		this._subscription?.dispose();
 		this._disposable.dispose();
 	}
@@ -49,9 +49,7 @@ class AICommitMessageProvider implements CommitMessageProvider, Disposable {
 
 		const currentMessage = repository.inputBox.value;
 		try {
-			const message = await (
-				await this.container.ai
-			)?.generateCommitMessage(
+			const message = await this.container.ai.generateCommitMessage(
 				changes,
 				{ source: 'scm-input' },
 				{

@@ -2,8 +2,8 @@ import type { GraphRow } from '@gitkraken/gitkraken-components';
 import { css, html } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 import { until } from 'lit/directives/until.js';
-import type { Deferrable } from '../../../../../system/function';
-import { debounce } from '../../../../../system/function';
+import type { Deferrable } from '../../../../../system/function/debounce';
+import { debounce } from '../../../../../system/function/debounce';
 import { getSettledValue, isPromise } from '../../../../../system/promise';
 import type { DidGetRowHoverParams } from '../../../../plus/graph/protocol';
 import { GlElement } from '../../../shared/components/element';
@@ -28,7 +28,15 @@ type Anchor = string | HTMLElement | { getBoundingClientRect: () => Omit<DOMRect
 
 @customElement('gl-graph-hover')
 export class GlGraphHover extends GlElement {
-	static override styles = css``;
+	static override styles = css`
+		gl-popover::part(body) {
+			--max-width: min(92vw, 45rem);
+			max-height: 50vh;
+			width: clamp(min(30rem, 92vw), min-content, max-content);
+			overflow-x: hidden;
+			overflow-y: auto;
+		}
+	`;
 
 	@property({ type: Object })
 	anchor?: Anchor;
@@ -61,7 +69,7 @@ export class GlGraphHover extends GlElement {
 	private hoveredSha: string | undefined;
 	private unhoverTimer: ReturnType<typeof setTimeout> | undefined;
 
-	override render() {
+	override render(): unknown {
 		if (!this.markdown) {
 			this.hide();
 			return;
@@ -109,18 +117,18 @@ export class GlGraphHover extends GlElement {
 		}
 	}
 
-	reset() {
+	reset(): void {
 		this.recalculated = false;
 		this.hoverMarkdownCache.clear();
 	}
 
-	onParentMouseLeave = () => {
+	private onParentMouseLeave = () => {
 		this.hide();
 	};
 
 	private _showCoreDebounced: Deferrable<GlGraphHover['showCore']> | undefined = undefined;
 
-	onRowHovered(row: GraphRow, anchor: Anchor) {
+	onRowHovered(row: GraphRow, anchor: Anchor): void {
 		clearTimeout(this.unhoverTimer);
 		if (this.requestMarkdown == null) return;
 		// Break if we are already showing the hover for the same row
@@ -155,7 +163,7 @@ export class GlGraphHover extends GlElement {
 		}
 	}
 
-	onRowUnhovered(_row: GraphRow, relatedTarget: EventTarget | null) {
+	onRowUnhovered(_row: GraphRow, relatedTarget: EventTarget | null): void {
 		this.recalculated = false;
 		clearTimeout(this.unhoverTimer);
 
@@ -170,7 +178,7 @@ export class GlGraphHover extends GlElement {
 		this.unhoverTimer = setTimeout(() => this.hide(), 250);
 	}
 
-	onWindowKeydown = (e: KeyboardEvent) => {
+	private onWindowKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Escape') {
 			e.stopPropagation();
 			this.hide();
@@ -205,7 +213,7 @@ export class GlGraphHover extends GlElement {
 		window.addEventListener('keydown', this.onWindowKeydown);
 	}
 
-	hide() {
+	hide(): void {
 		this._showCoreDebounced?.cancel();
 		clearTimeout(this.unhoverTimer);
 		this.parentElement?.removeEventListener('mouseleave', this.onParentMouseLeave);

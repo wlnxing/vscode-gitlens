@@ -40,7 +40,7 @@ export abstract class QuickWizardCommandBase extends GlCommandBase {
 	}
 
 	@log({ args: false, scoped: true, singleLine: true, timed: false })
-	async execute(args?: QuickWizardCommandArgsWithCompletion) {
+	async execute(args?: QuickWizardCommandArgsWithCompletion): Promise<void> {
 		const rootStep = new QuickWizardRootStep(this.container, args);
 
 		const command = args?.command != null ? rootStep.find(args.command) : undefined;
@@ -295,7 +295,11 @@ export abstract class QuickWizardCommandBase extends GlCommandBase {
 
 				disposables.push(
 					scope,
-					input.onDidHide(() => resolve(undefined)),
+					input.onDidHide(() => {
+						if (step.frozen) return;
+
+						resolve(undefined);
+					}),
 					input.onDidTriggerButton(async e => {
 						if (e === QuickInputButtons.Back) {
 							void goBack();
@@ -379,6 +383,8 @@ export abstract class QuickWizardCommandBase extends GlCommandBase {
 						debugger;
 					}
 				}
+
+				step.onDidActivate?.(input);
 			});
 		} finally {
 			input.dispose();

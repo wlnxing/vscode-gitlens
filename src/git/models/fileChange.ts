@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Uri } from 'vscode';
 import type { Container } from '../../container';
 import { memoize } from '../../system/decorators/-webview/memoize';
@@ -30,7 +31,7 @@ export class GitFileChange implements GitFileChangeShape {
 		public readonly staged?: boolean,
 	) {}
 
-	get hasConflicts() {
+	get hasConflicts(): boolean {
 		switch (this.status) {
 			case GitFileConflictStatus.AddedByThem:
 			case GitFileConflictStatus.AddedByUs:

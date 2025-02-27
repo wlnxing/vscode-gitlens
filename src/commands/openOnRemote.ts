@@ -34,10 +34,10 @@ export type OpenOnRemoteCommandArgs =
 @command()
 export class OpenOnRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super([GlCommand.OpenOnRemote, GlCommand.Deprecated_OpenInRemote]);
+		super([GlCommand.OpenOnRemote, /** @deprecated */ 'gitlens.openInRemote']);
 	}
 
-	async execute(args?: OpenOnRemoteCommandArgs) {
+	async execute(args?: OpenOnRemoteCommandArgs): Promise<void> {
 		if (args?.resource == null) return;
 
 		let remotes =
@@ -71,11 +71,9 @@ export class OpenOnRemoteCommand extends GlCommandBase {
 						const file = await commit.findFile(fileName);
 						if (file?.status === 'D') {
 							// Resolve to the previous commit to that file
-							resource.sha = await this.container.git.resolveReference(
-								commit.repoPath,
-								`${commit.sha}^`,
-								fileName,
-							);
+							resource.sha = await this.container.git
+								.refs(commit.repoPath)
+								.resolveReference(`${commit.sha}^`, fileName);
 						} else {
 							resource.sha = commit.sha;
 						}

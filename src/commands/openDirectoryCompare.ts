@@ -22,16 +22,19 @@ export interface OpenDirectoryCompareCommandArgs {
 export class OpenDirectoryCompareCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
 		super([
-			GlCommand.DiffDirectory,
-			GlCommand.DiffDirectoryWithHead,
+			'gitlens.diffDirectory',
+			'gitlens.diffDirectoryWithHead',
 			GlCommand.ViewsOpenDirectoryDiff,
 			GlCommand.ViewsOpenDirectoryDiffWithWorking,
 		]);
 	}
 
-	protected override async preExecute(context: CommandContext, args?: OpenDirectoryCompareCommandArgs) {
+	protected override async preExecute(
+		context: CommandContext,
+		args?: OpenDirectoryCompareCommandArgs,
+	): Promise<void> {
 		switch (context.command) {
-			case GlCommand.DiffDirectoryWithHead:
+			case 'gitlens.diffDirectoryWithHead':
 				args = { ...args };
 				args.ref1 = 'HEAD';
 				args.ref2 = undefined;
@@ -56,7 +59,7 @@ export class OpenDirectoryCompareCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: OpenDirectoryCompareCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: OpenDirectoryCompareCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 		args = { ...args };
 

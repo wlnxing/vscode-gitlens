@@ -65,6 +65,7 @@ export interface IssueProject {
 	id: string;
 	name: string;
 	resourceId: string;
+	resourceName: string;
 }
 
 export interface IssueRepository {
@@ -72,11 +73,7 @@ export interface IssueRepository {
 	repo: string;
 	accessLevel?: RepositoryAccessLevel;
 	url?: string;
-}
-
-export interface SearchedIssue {
-	issue: IssueShape;
-	reasons: string[];
+	id?: string;
 }
 
 export type IssueRepositoryIdentityDescriptor = RequireSomeWithProps<

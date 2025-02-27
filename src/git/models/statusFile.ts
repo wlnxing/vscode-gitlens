@@ -1,14 +1,16 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Uri } from 'vscode';
 import type { Container } from '../../container';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { getGitFileFormattedDirectory, getGitFileFormattedPath } from '../utils/-webview/file.utils';
+import { getPseudoCommits } from '../utils/-webview/statusFile.utils';
 import { getGitFileStatusText } from '../utils/fileStatus.utils';
-import { GitCommit, GitCommitIdentity } from './commit';
+import type { GitCommit } from './commit';
 import type { GitFile } from './file';
 import { GitFileChange } from './fileChange';
 import type { GitFileStatus } from './fileStatus';
 import { GitFileConflictStatus, GitFileIndexStatus, GitFileWorkingTreeStatus } from './fileStatus';
-import { uncommitted, uncommittedStaged } from './revision';
+import { uncommittedStaged } from './revision';
 import type { GitUser } from './user';
 
 export class GitStatusFile implements GitFile {
@@ -90,11 +92,11 @@ export class GitStatusFile implements GitFile {
 		}
 	}
 
-	get conflicted() {
+	get conflicted(): boolean {
 		return this.conflictStatus != null;
 	}
 
-	get staged() {
+	get staged(): boolean {
 		return this.indexStatus != null;
 	}
 
@@ -108,7 +110,7 @@ export class GitStatusFile implements GitFile {
 		return this.container.git.getAbsoluteUri(this.path, this.repoPath);
 	}
 
-	get wip() {
+	get wip(): boolean {
 		return this.workingTreeStatus != null;
 	}
 
@@ -125,100 +127,7 @@ export class GitStatusFile implements GitFile {
 	}
 
 	getPseudoCommits(container: Container, user: GitUser | undefined): GitCommit[] {
-		const now = new Date();
-
-		if (this.conflicted) {
-			const file = new GitFileChange(
-				container,
-				this.repoPath,
-				this.path,
-				this.status,
-				this.originalPath,
-				'HEAD',
-				undefined,
-				false,
-			);
-			return [
-				new GitCommit(
-					container,
-					this.repoPath,
-					uncommitted,
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					'Uncommitted changes',
-					['HEAD'],
-					'Uncommitted changes',
-					{ file: file, files: [file] },
-					undefined,
-					[],
-				),
-			];
-		}
-
-		const commits: GitCommit[] = [];
-		const staged = this.staged;
-
-		if (this.wip) {
-			const previousSha = staged ? uncommittedStaged : 'HEAD';
-			const file = new GitFileChange(
-				this.container,
-				this.repoPath,
-				this.path,
-				this.workingTreeStatus ?? this.status,
-				this.originalPath,
-				previousSha,
-				undefined,
-				false,
-			);
-			commits.push(
-				new GitCommit(
-					container,
-					this.repoPath,
-					uncommitted,
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					'Uncommitted changes',
-					[previousSha],
-					'Uncommitted changes',
-					{ file: file, files: [file] },
-					undefined,
-					[],
-				),
-			);
-
-			// Decrements the date to guarantee the staged entry (if exists) will be sorted after the working entry (most recent first)
-			now.setMilliseconds(now.getMilliseconds() - 1);
-		}
-
-		if (staged) {
-			const file = new GitFileChange(
-				this.container,
-				this.repoPath,
-				this.path,
-				this.indexStatus ?? this.status,
-				this.originalPath,
-				'HEAD',
-				undefined,
-				true,
-			);
-			commits.push(
-				new GitCommit(
-					container,
-					this.repoPath,
-					uncommittedStaged,
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					new GitCommitIdentity('You', user?.email ?? undefined, now),
-					'Uncommitted changes',
-					['HEAD'],
-					'Uncommitted changes',
-					{ file: file, files: [file] },
-					undefined,
-					[],
-				),
-			);
-		}
-
-		return commits;
+		return getPseudoCommits(container, [this], user);
 	}
 
 	getPseudoFileChanges(): GitFileChange[] {

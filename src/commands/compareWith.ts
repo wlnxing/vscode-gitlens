@@ -21,25 +21,25 @@ export class CompareWithCommand extends ActiveEditorCommand {
 			GlCommand.CompareWith,
 			GlCommand.CompareHeadWith,
 			GlCommand.CompareWorkingWith,
-			GlCommand.Deprecated_DiffHeadWith,
-			GlCommand.Deprecated_DiffWorkingWith,
+			/** @deprecated */ 'gitlens.diffHeadWith',
+			/** @deprecated */ 'gitlens.diffWorkingWith',
 		]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: CompareWithCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: CompareWithCommandArgs): Promise<void> {
 		switch (context.command) {
 			case GlCommand.CompareWith:
 				args = { ...args };
 				break;
 
 			case GlCommand.CompareHeadWith:
-			case GlCommand.Deprecated_DiffHeadWith:
+			case /** @deprecated */ 'gitlens.diffHeadWith':
 				args = { ...args };
 				args.ref1 = 'HEAD';
 				break;
 
 			case GlCommand.CompareWorkingWith:
-			case GlCommand.Deprecated_DiffWorkingWith:
+			case /** @deprecated */ 'gitlens.diffWorkingWith':
 				args = { ...args };
 				args.ref1 = '';
 				break;
@@ -48,7 +48,7 @@ export class CompareWithCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: CompareWithCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: CompareWithCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 		args = { ...args };
 

@@ -2,7 +2,7 @@ import { css, html, LitElement } from 'lit';
 import { customElement, property, queryAll } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { when } from 'lit/directives/when.js';
-import { debounce } from '../../../../../system/function';
+import { debounce } from '../../../../../system/function/debounce';
 import type { GetOverviewBranch } from '../../../../home/protocol';
 import type { GlBranchCardBase } from './branch-card';
 import '../../../shared/components/progress';
@@ -48,7 +48,7 @@ export class GlSection extends LitElement {
 	@property({ attribute: 'heading-level' })
 	headingLevel: ARIAMixin['ariaLevel'] = '3';
 
-	override render() {
+	override render(): unknown {
 		return html`
 			<div class="section">
 				<header class="section__header">
@@ -78,12 +78,12 @@ export class GlBranchSection extends LitElement {
 	@queryAll('gl-branch-card')
 	private branchCards!: GlBranchCardBase[];
 
-	override connectedCallback() {
+	override connectedCallback(): void {
 		super.connectedCallback();
 		this.addEventListener('gl-branch-card-expand-toggled', this.onCardExpanded.bind(this));
 	}
 
-	override disconnectedCallback() {
+	override disconnectedCallback(): void {
 		super.disconnectedCallback();
 		this.removeEventListener('gl-branch-card-expand-toggled', this.onCardExpanded.bind(this));
 	}
@@ -114,7 +114,7 @@ export class GlBranchSection extends LitElement {
 		return `${this.label} (${this.branches.length})`;
 	}
 
-	override render() {
+	override render(): unknown {
 		return html`
 			<gl-section ?loading=${this.isFetching}>
 				<span slot="heading">${this.renderSectionLabel()}</span>

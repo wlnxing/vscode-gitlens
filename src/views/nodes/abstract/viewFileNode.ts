@@ -31,15 +31,11 @@ export abstract class ViewFileNode<
 	}
 }
 
-export function isViewFileNode(node: unknown): node is ViewFileNode {
-	return node instanceof ViewFileNode;
-}
-
 export function getFileTooltip(
 	file: GitFile | GitStatusFile,
 	suffix?: string,
 	outputFormat?: 'markdown' | 'plaintext',
-) {
+): string {
 	return StatusFileFormatter.fromTemplate(
 		`\${status${suffix ? `' ${suffix}'` : ''}} $(file) \${filePath}\${  ←  originalPath}\${'\\\n'changesDetail}`,
 		file,
@@ -49,7 +45,7 @@ export function getFileTooltip(
 	);
 }
 
-export function getFileTooltipMarkdown(file: GitFile | GitStatusFile, suffix?: string) {
+export function getFileTooltipMarkdown(file: GitFile | GitStatusFile, suffix?: string): MarkdownString {
 	const tooltip = new MarkdownString(getFileTooltip(file, suffix, 'markdown'), true);
 	tooltip.supportHtml = true;
 	tooltip.isTrusted = true;

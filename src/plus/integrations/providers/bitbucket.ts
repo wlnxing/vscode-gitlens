@@ -2,16 +2,11 @@ import type { AuthenticationSession, CancellationToken } from 'vscode';
 import { HostingIntegrationId } from '../../../constants.integrations';
 import type { Account } from '../../../git/models/author';
 import type { DefaultBranch } from '../../../git/models/defaultBranch';
-import type { Issue, SearchedIssue } from '../../../git/models/issue';
-import type { IssueOrPullRequest } from '../../../git/models/issueOrPullRequest';
-import type {
-	PullRequest,
-	PullRequestMergeMethod,
-	PullRequestState,
-	SearchedPullRequest,
-} from '../../../git/models/pullRequest';
+import type { Issue, IssueShape } from '../../../git/models/issue';
+import type { IssueOrPullRequest, IssueOrPullRequestType } from '../../../git/models/issueOrPullRequest';
+import type { PullRequest, PullRequestMergeMethod, PullRequestState } from '../../../git/models/pullRequest';
 import type { RepositoryMetadata } from '../../../git/models/repositoryMetadata';
-import type { IntegrationAuthenticationProviderDescriptor } from '../authentication/integrationAuthentication';
+import type { IntegrationAuthenticationProviderDescriptor } from '../authentication/integrationAuthenticationProvider';
 import type { ResourceDescriptor } from '../integration';
 import { HostingIntegration } from '../integration';
 import { providersMetadata } from './models';
@@ -80,11 +75,22 @@ export class BitbucketIntegration extends HostingIntegration<
 	}
 
 	protected override async getProviderIssueOrPullRequest(
-		_session: AuthenticationSession,
-		_repo: BitbucketRepositoryDescriptor,
-		_id: string,
+		{ accessToken }: AuthenticationSession,
+		repo: BitbucketRepositoryDescriptor,
+		id: string,
+		type: undefined | IssueOrPullRequestType,
 	): Promise<IssueOrPullRequest | undefined> {
-		return Promise.resolve(undefined);
+		return (await this.container.bitbucket)?.getIssueOrPullRequest(
+			this,
+			accessToken,
+			repo.owner,
+			repo.name,
+			id,
+			this.apiBaseUrl,
+			{
+				type: type,
+			},
+		);
 	}
 
 	protected override async getProviderIssue(
@@ -96,15 +102,22 @@ export class BitbucketIntegration extends HostingIntegration<
 	}
 
 	protected override async getProviderPullRequestForBranch(
-		_session: AuthenticationSession,
-		_repo: BitbucketRepositoryDescriptor,
-		_branch: string,
+		{ accessToken }: AuthenticationSession,
+		repo: BitbucketRepositoryDescriptor,
+		branch: string,
 		_options?: {
 			avatarSize?: number;
 			include?: PullRequestState[];
 		},
 	): Promise<PullRequest | undefined> {
-		return Promise.resolve(undefined);
+		return (await this.container.bitbucket)?.getPullRequestForBranch(
+			this,
+			accessToken,
+			repo.owner,
+			repo.name,
+			branch,
+			this.apiBaseUrl,
+		);
 	}
 
 	protected override async getProviderPullRequestForCommit(
@@ -126,14 +139,19 @@ export class BitbucketIntegration extends HostingIntegration<
 	protected override async searchProviderMyPullRequests(
 		_session: AuthenticationSession,
 		_repos?: BitbucketRepositoryDescriptor[],
-	): Promise<SearchedPullRequest[] | undefined> {
+	): Promise<PullRequest[] | undefined> {
 		return Promise.resolve(undefined);
 	}
 
 	protected override async searchProviderMyIssues(
 		_session: AuthenticationSession,
 		_repos?: BitbucketRepositoryDescriptor[],
-	): Promise<SearchedIssue[] | undefined> {
+	): Promise<IssueShape[] | undefined> {
 		return Promise.resolve(undefined);
 	}
+}
+
+const bitbucketCloudDomainRegex = /^bitbucket\.org$/i;
+export function isBitbucketCloudDomain(domain: string | undefined): boolean {
+	return domain != null && bitbucketCloudDomainRegex.test(domain);
 }

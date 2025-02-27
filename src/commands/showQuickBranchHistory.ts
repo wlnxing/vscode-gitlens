@@ -19,11 +19,11 @@ export interface ShowQuickBranchHistoryCommandArgs {
 @command()
 export class ShowQuickBranchHistoryCommand extends ActiveEditorCachedCommand {
 	constructor(private readonly container: Container) {
-		super([GlCommand.ShowQuickBranchHistory, GlCommand.ShowQuickCurrentBranchHistory]);
+		super([GlCommand.ShowQuickBranchHistory, 'gitlens.showQuickRepoHistory']);
 	}
 
-	protected override preExecute(context: CommandContext, args?: ShowQuickBranchHistoryCommandArgs) {
-		if (context.command === GlCommand.ShowQuickCurrentBranchHistory) {
+	protected override preExecute(context: CommandContext, args?: ShowQuickBranchHistoryCommandArgs): Promise<void> {
+		if (context.command === 'gitlens.showQuickRepoHistory') {
 			args = { ...args };
 			args.branch = 'HEAD';
 		}
@@ -31,7 +31,7 @@ export class ShowQuickBranchHistoryCommand extends ActiveEditorCachedCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: ShowQuickBranchHistoryCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: ShowQuickBranchHistoryCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 
 		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;

@@ -6,10 +6,10 @@ import { CommitFormatter } from '../git/formatters/commitFormatter';
 import type { PullRequest } from '../git/models/pullRequest';
 import { detailsMessage } from '../hovers/hovers';
 import { configuration } from '../system/-webview/configuration';
-import { isTrackableTextEditor } from '../system/-webview/utils';
+import { isTrackableTextEditor } from '../system/-webview/vscode';
 import { debug, log } from '../system/decorators/log';
 import { once } from '../system/event';
-import { debounce } from '../system/function';
+import { debounce } from '../system/function/debounce';
 import { Logger } from '../system/logger';
 import { getLogScope, setLogScopeExit } from '../system/logger.scope';
 import type { MaybePausedResult } from '../system/promise';
@@ -44,7 +44,7 @@ export class LineAnnotationController implements Disposable {
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this.clearAnnotations(this._editor);
 
 		this.container.lineTracker.unsubscribe(this);
@@ -72,12 +72,12 @@ export class LineAnnotationController implements Disposable {
 	}
 
 	private _suspended: boolean = false;
-	get suspended() {
+	get suspended(): boolean {
 		return !this._enabled || this._suspended;
 	}
 
 	@log()
-	resume() {
+	resume(): boolean {
 		this.setLineTracker(true);
 
 		if (this._suspended) {
@@ -89,7 +89,7 @@ export class LineAnnotationController implements Disposable {
 	}
 
 	@log()
-	suspend() {
+	suspend(): boolean {
 		this.setLineTracker(false);
 
 		if (!this._suspended) {
@@ -123,7 +123,7 @@ export class LineAnnotationController implements Disposable {
 	}
 
 	@debug({ args: false, singleLine: true })
-	clear(editor: TextEditor | undefined) {
+	clear(editor: TextEditor | undefined): void {
 		this._cancellation?.cancel();
 		if (this._editor !== editor && this._editor != null) {
 			this.clearAnnotations(this._editor);
@@ -132,7 +132,7 @@ export class LineAnnotationController implements Disposable {
 	}
 
 	@log({ args: false })
-	async toggle(editor: TextEditor | undefined) {
+	async toggle(editor: TextEditor | undefined): Promise<void> {
 		this._enabled = !(this._enabled && !this.suspended);
 
 		if (this._enabled) {
@@ -238,26 +238,6 @@ export class LineAnnotationController implements Disposable {
 
 		let uncommittedOnly = true;
 
-		const commitPromises = new Map<string, Promise<void>>();
-		const lines = new Map<number, LineState>();
-		for (const selection of selections) {
-			const state = this.container.lineTracker.getState(selection.active);
-			if (state?.commit == null) {
-				Logger.debug(scope, `Line ${selection.active} returned no commit`);
-				continue;
-			}
-
-			if (state.commit.message == null && !commitPromises.has(state.commit.ref)) {
-				commitPromises.set(state.commit.ref, state.commit.ensureFullDetails());
-			}
-			lines.set(selection.active, state);
-			if (!state.commit.isUncommitted) {
-				uncommittedOnly = false;
-			}
-		}
-
-		const repoPath = trackedDocument.uri.repoPath;
-
 		let hoverOptions: RequireSome<Parameters<typeof detailsMessage>[4], 'autolinks' | 'pullRequests'> | undefined;
 		// Live Share (vsls schemes) don't support `languages.registerHoverProvider` so we'll need to add them to the decoration directly
 		if (editor.document.uri.scheme === Schemes.Vsls || editor.document.uri.scheme === Schemes.VslsScc) {
@@ -269,6 +249,27 @@ export class LineAnnotationController implements Disposable {
 				pullRequests: hoverCfg.pullRequests.enabled,
 			};
 		}
+
+		const commitPromises = new Map<string, Promise<void>>();
+		const lines = new Map<number, LineState>();
+		for (const selection of selections) {
+			const state = this.container.lineTracker.getState(selection.active);
+			if (state?.commit == null) {
+				Logger.debug(scope, `Line ${selection.active} returned no commit`);
+				continue;
+			}
+
+			// Only ensure the full details if we have to add the hover eagerly (Live Share) and we don't have a message
+			if (hoverOptions != null && state.commit.message == null && !commitPromises.has(state.commit.ref)) {
+				commitPromises.set(state.commit.ref, state.commit.ensureFullDetails());
+			}
+			lines.set(selection.active, state);
+			if (!state.commit.isUncommitted) {
+				uncommittedOnly = false;
+			}
+		}
+
+		const repoPath = trackedDocument.uri.repoPath;
 
 		const getPullRequests =
 			!uncommittedOnly &&

@@ -13,7 +13,8 @@ import { memoize } from '../../system/decorators/-webview/memoize';
 import { debug } from '../../system/decorators/log';
 import { weakEvent } from '../../system/event';
 import { filterMap } from '../../system/iterable';
-import { Logger } from '../../system/logger';
+import { getLoggableName, Logger } from '../../system/logger';
+import { startLogScope } from '../../system/logger.scope';
 import type { FileHistoryView } from '../fileHistoryView';
 import type { LineHistoryView } from '../lineHistoryView';
 import { SubscribeableViewNode } from './abstract/subscribeableViewNode';
@@ -114,7 +115,7 @@ export class LineHistoryNode
 						workingTreeStatus: status?.workingTreeStatus,
 					};
 
-					const currentUser = await this.view.container.git.getCurrentUser(this.uri.repoPath);
+					const currentUser = await this.view.container.git.config(this.uri.repoPath).getCurrentUser();
 					const pseudoCommits = status?.getPseudoCommits(this.view.container, currentUser);
 					if (pseudoCommits != null) {
 						for (const commit of pseudoCommits.reverse()) {
@@ -175,21 +176,21 @@ export class LineHistoryNode
 		return item;
 	}
 
-	get label() {
+	get label(): string {
 		return `${this.uri.fileName}${this.lines}${
 			this.uri.sha ? ` ${this.uri.sha === deletedOrMissing ? this.uri.shortSha : `(${this.uri.shortSha})`}` : ''
 		}`;
 	}
 
 	@memoize()
-	get lines() {
+	get lines(): string {
 		return this.selection.isSingleLine
 			? `:${this.selection.start.line + 1}`
 			: `:${this.selection.start.line + 1}-${this.selection.end.line + 1}`;
 	}
 
 	@debug()
-	protected subscribe() {
+	protected subscribe(): Disposable | undefined {
 		const repo = this.view.container.git.getRepository(this.uri);
 		if (repo == null) return undefined;
 
@@ -220,7 +221,8 @@ export class LineHistoryNode
 			return;
 		}
 
-		Logger.debug(`LineHistoryNode.onRepositoryChanged(${e.toString()}); triggering node refresh`);
+		using scope = startLogScope(`${getLoggableName(this)}.onRepositoryChanged(e=${e.toString()})`, false);
+		Logger.debug(scope, 'triggering node refresh');
 
 		void this.triggerChange(true);
 	}
@@ -228,14 +230,18 @@ export class LineHistoryNode
 	private onFileSystemChanged(e: RepositoryFileSystemChangeEvent) {
 		if (!e.uris.some(uri => uri.toString() === this.uri.toString())) return;
 
-		Logger.debug(`LineHistoryNode.onFileSystemChanged(${this.uri.toString(true)}); triggering node refresh`);
+		using scope = startLogScope(
+			`${getLoggableName(this)}.onFileSystemChanged(e=${this.uri.toString(true)})`,
+			false,
+		);
+		Logger.debug(scope, 'triggering node refresh');
 
 		void this.triggerChange(true);
 	}
 
 	@gate()
 	@debug()
-	override refresh(reset?: boolean) {
+	override refresh(reset?: boolean): void {
 		if (reset) {
 			this._log = undefined;
 		}
@@ -257,12 +263,12 @@ export class LineHistoryNode
 		return this._log;
 	}
 
-	get hasMore() {
+	get hasMore(): boolean {
 		return this._log?.hasMore ?? true;
 	}
 
 	@gate()
-	async loadMore(limit?: number | { until?: any }) {
+	async loadMore(limit?: number | { until?: any }): Promise<void> {
 		let log = await window.withProgress(
 			{
 				location: { viewId: this.view.id },

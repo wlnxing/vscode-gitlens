@@ -5,7 +5,7 @@ import type { Container } from '../container';
 import { showGenericErrorMessage } from '../messages';
 import { getRepositoryOrShowPicker } from '../quickpicks/repositoryPicker';
 import { command } from '../system/-webview/command';
-import { findOrOpenEditors } from '../system/-webview/utils';
+import { findOrOpenEditors } from '../system/-webview/vscode';
 import { filterMap } from '../system/array';
 import { Logger } from '../system/logger';
 import { GlCommandBase } from './commandBase';
@@ -20,7 +20,7 @@ export class OpenChangedFilesCommand extends GlCommandBase {
 		super(GlCommand.OpenChangedFiles);
 	}
 
-	async execute(args?: OpenChangedFilesCommandArgs) {
+	async execute(args?: OpenChangedFilesCommandArgs): Promise<void> {
 		args = { ...args };
 
 		try {

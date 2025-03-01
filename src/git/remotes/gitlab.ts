@@ -1,5 +1,10 @@
 import type { Range, Uri } from 'vscode';
-import type { Autolink, AutolinkReference, DynamicAutolinkReference, MaybeEnrichedAutolink } from '../../autolinks';
+import type {
+	Autolink,
+	AutolinkReference,
+	DynamicAutolinkReference,
+	MaybeEnrichedAutolink,
+} from '../../autolinks/models/autolinks';
 import { GlyphChars } from '../../constants';
 import type { GitLabRepositoryDescriptor } from '../../plus/integrations/providers/gitlab';
 import type { Brand, Unbrand } from '../../system/brand';
@@ -29,7 +34,7 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		super(domain, path, protocol, name, custom);
 	}
 
-	get apiBaseUrl() {
+	get apiBaseUrl(): string {
 		return this.custom ? `${this.protocol}://${this.domain}/api` : `https://${this.domain}/api`;
 	}
 
@@ -266,7 +271,7 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 		return this._autolinks;
 	}
 
-	override get icon() {
+	override get icon(): string {
 		return 'gitlab';
 	}
 
@@ -280,7 +285,7 @@ export class GitLabRemote extends RemoteProvider<GitLabRepositoryDescriptor> {
 			: 'gitlab') satisfies Unbrand<GkProviderId> as Brand<GkProviderId>;
 	}
 
-	get name() {
+	get name(): string {
 		return this.formatName('GitLab');
 	}
 

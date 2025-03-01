@@ -3,7 +3,13 @@ import { commands } from 'vscode';
 import type { Action, ActionContext } from '../../api/gitlens';
 import type { GlCommandBase } from '../../commands/commandBase';
 import type { CodeLensCommand } from '../../config';
-import type { Commands, CoreCommands, CoreGitCommands, GlCommands } from '../../constants.commands';
+import type {
+	CoreCommands,
+	CoreGitCommands,
+	GlCommands,
+	WebviewCommands,
+	WebviewViewCommands,
+} from '../../constants.commands';
 import { actionCommandPrefix, GlCommand } from '../../constants.commands';
 import { Container } from '../../container';
 import { isWebviewContext } from '../webview';
@@ -19,7 +25,7 @@ export function command(): ClassDecorator {
 	};
 }
 
-export function registerCommand(command: Commands, callback: CommandCallback, thisArg?: any): Disposable {
+export function registerCommand(command: GlCommands, callback: CommandCallback, thisArg?: any): Disposable {
 	return commands.registerCommand(
 		command,
 		function (this: any, ...args) {
@@ -61,7 +67,11 @@ export function registerCommand(command: Commands, callback: CommandCallback, th
 	);
 }
 
-export function registerWebviewCommand(command: Commands, callback: CommandCallback, thisArg?: any): Disposable {
+export function registerWebviewCommand(
+	command: WebviewCommands | WebviewViewCommands,
+	callback: CommandCallback,
+	thisArg?: any,
+): Disposable {
 	return commands.registerCommand(
 		command,
 		function (this: any, ...args) {
@@ -99,12 +109,15 @@ export function registerCommands(container: Container): Disposable[] {
 	return registrableCommands.map(c => new c(container));
 }
 
-export function executeActionCommand<T extends ActionContext>(action: Action<T>, args: Omit<T, 'type'>) {
+export function executeActionCommand<T extends ActionContext>(
+	action: Action<T>,
+	args: Omit<T, 'type'>,
+): Thenable<unknown> {
 	return commands.executeCommand(`${actionCommandPrefix}${action}`, { ...args, type: action });
 }
 
 export function createCommand<T extends unknown[]>(
-	command: Commands | CodeLensCommand,
+	command: GlCommands | CodeLensCommand,
 	title: string,
 	...args: T
 ): Command {
@@ -115,10 +128,10 @@ export function createCommand<T extends unknown[]>(
 	};
 }
 
-export function executeCommand<U = any>(command: Commands): Thenable<U>;
-export function executeCommand<T = unknown, U = any>(command: Commands, arg: T): Thenable<U>;
-export function executeCommand<T extends [...unknown[]] = [], U = any>(command: Commands, ...args: T): Thenable<U>;
-export function executeCommand<T extends [...unknown[]] = [], U = any>(command: Commands, ...args: T): Thenable<U> {
+export function executeCommand<U = any>(command: GlCommands): Thenable<U>;
+export function executeCommand<T = unknown, U = any>(command: GlCommands, arg: T): Thenable<U>;
+export function executeCommand<T extends [...unknown[]] = [], U = any>(command: GlCommands, ...args: T): Thenable<U>;
+export function executeCommand<T extends [...unknown[]] = [], U = any>(command: GlCommands, ...args: T): Thenable<U> {
 	return commands.executeCommand<U>(command, ...args);
 }
 
@@ -177,6 +190,6 @@ export function executeCoreGitCommand<T extends [...unknown[]] = [], U = any>(
 	return commands.executeCommand<U>(command, ...args);
 }
 
-export function executeEditorCommand<T>(command: GlCommands, uri: Uri | undefined, args: T) {
+export function executeEditorCommand<T>(command: GlCommands, uri: Uri | undefined, args: T): Thenable<unknown> {
 	return commands.executeCommand(command, uri, args);
 }

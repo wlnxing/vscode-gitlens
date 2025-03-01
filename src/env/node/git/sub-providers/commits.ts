@@ -3,6 +3,7 @@ import { Range } from 'vscode';
 import type { SearchQuery } from '../../../../constants.search';
 import type { Container } from '../../../../container';
 import type { GitCache } from '../../../../git/cache';
+import { GitErrorHandling } from '../../../../git/commandOptions';
 import type { GitCommitsSubProvider, LeftRightCommitCountResult } from '../../../../git/gitProvider';
 import { GitUri } from '../../../../git/gitUri';
 import type { GitBlame } from '../../../../git/models/blame';
@@ -12,6 +13,7 @@ import type { GitFile } from '../../../../git/models/file';
 import { GitFileChange } from '../../../../git/models/fileChange';
 import type { GitFileStatus } from '../../../../git/models/fileStatus';
 import type { GitLog } from '../../../../git/models/log';
+import type { GitReflog } from '../../../../git/models/reflog';
 import type { GitRevisionRange } from '../../../../git/models/revision';
 import { deletedOrMissing } from '../../../../git/models/revision';
 import type { GitUser } from '../../../../git/models/user';
@@ -24,7 +26,9 @@ import {
 	parseGitLogAllFormat,
 	parseGitLogDefaultFormat,
 } from '../../../../git/parsers/logParser';
+import { parseGitRefLog, parseGitRefLogDefaultFormat } from '../../../../git/parsers/reflogParser';
 import { getGitArgsFromSearchQuery } from '../../../../git/search';
+import { createUncommittedChangesCommit } from '../../../../git/utils/-webview/commit.utils';
 import { isRevisionRange, isSha, isUncommitted } from '../../../../git/utils/revision.utils';
 import { configuration } from '../../../../system/-webview/configuration';
 import { splitPath } from '../../../../system/-webview/path';
@@ -37,10 +41,11 @@ import { isFolderGlob } from '../../../../system/path';
 import type { CachedLog, TrackedGitDocument } from '../../../../trackers/trackedDocument';
 import { GitDocumentState } from '../../../../trackers/trackedDocument';
 import type { Git } from '../git';
-import { gitLogDefaultConfigsWithFiles } from '../git';
+import { gitLogDefaultConfigs, gitLogDefaultConfigsWithFiles } from '../git';
 import type { LocalGitProvider } from '../localGitProvider';
 
 const emptyPromise: Promise<GitBlame | GitDiffFile | GitLog | undefined> = Promise.resolve(undefined);
+const reflogCommands = ['merge', 'pull'];
 
 export class CommitsGitSubProvider implements GitCommitsSubProvider {
 	constructor(
@@ -56,6 +61,16 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 
 	@log()
 	async getCommit(repoPath: string, rev: string): Promise<GitCommit | undefined> {
+		if (isUncommitted(rev, true)) {
+			return createUncommittedChangesCommit(
+				this.container,
+				repoPath,
+				rev,
+				new Date(),
+				await this.provider.config.getCurrentUser(repoPath),
+			);
+		}
+
 		const log = await this.getLog(repoPath, rev, { limit: 2 });
 		if (log == null) return undefined;
 
@@ -63,8 +78,14 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 	}
 
 	@log({ exit: true })
-	getCommitCount(repoPath: string, rev: string): Promise<number | undefined> {
-		return this.git.rev_list__count(repoPath, rev);
+	async getCommitCount(repoPath: string, rev: string): Promise<number | undefined> {
+		const data = (
+			await this.git.exec({ cwd: repoPath, errors: GitErrorHandling.Ignore }, 'rev-list', '--count', rev, '--')
+		)?.trim();
+		if (!data?.length) return undefined;
+
+		const result = parseInt(data, 10);
+		return isNaN(result) ? undefined : result;
 	}
 
 	@log()
@@ -106,7 +127,15 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 		const [relativePath, root] = splitPath(uri, repoPath);
 
 		// Don't include the filename, as renames won't be returned
-		const data = await this.git.show(root, undefined, '--name-status', '--format=', '-z', rev, '--');
+		const data = await this.git.exec(
+			{ cwd: root, configs: gitLogDefaultConfigs },
+			'show',
+			'--name-status',
+			'--format=',
+			'-z',
+			rev,
+			'--',
+		);
 		if (!data) return undefined;
 
 		const files = parseGitDiffNameStatusFiles(data, repoPath);
@@ -147,23 +176,143 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 		}
 	}
 
+	@log()
+	async getIncomingActivity(
+		repoPath: string,
+		options?: {
+			all?: boolean;
+			branch?: string;
+			limit?: number;
+			ordering?: 'date' | 'author-date' | 'topo' | null;
+			skip?: number;
+		},
+	): Promise<GitReflog | undefined> {
+		const scope = getLogScope();
+
+		const args = ['--walk-reflogs', `--format=${parseGitRefLogDefaultFormat}`, '--date=iso8601'];
+
+		const ordering = options?.ordering ?? configuration.get('advanced.commitOrdering');
+		if (ordering) {
+			args.push(`--${ordering}-order`);
+		}
+
+		if (options?.all) {
+			args.push('--all');
+		}
+
+		// Pass a much larger limit to reflog, because we aggregate the data and we won't know how many lines we'll need
+		const limit = (options?.limit ?? configuration.get('advanced.maxListItems') ?? 0) * 100;
+		if (limit) {
+			args.push(`-n${limit}`);
+		}
+
+		if (options?.skip) {
+			args.push(`--skip=${options.skip}`);
+		}
+
+		try {
+			const data = await this.git.log(repoPath, undefined, undefined, ...args);
+			if (data == null) return undefined;
+
+			const reflog = parseGitRefLog(this.container, data, repoPath, reflogCommands, limit, limit * 100);
+			if (reflog?.hasMore) {
+				reflog.more = this.getReflogMoreFn(reflog, options);
+			}
+
+			return reflog;
+		} catch (ex) {
+			Logger.error(ex, scope);
+			return undefined;
+		}
+	}
+
+	private getReflogMoreFn(
+		reflog: GitReflog,
+		options?: {
+			all?: boolean;
+			branch?: string;
+			limit?: number;
+			ordering?: 'date' | 'author-date' | 'topo' | null;
+			skip?: number;
+		},
+	): (limit: number) => Promise<GitReflog> {
+		return async (limit: number | undefined) => {
+			limit = limit ?? configuration.get('advanced.maxSearchItems') ?? 0;
+
+			const moreLog = await this.getIncomingActivity(reflog.repoPath, {
+				...options,
+				limit: limit,
+				skip: reflog.total,
+			});
+			if (moreLog == null) {
+				// If we can't find any more, assume we have everything
+				return { ...reflog, hasMore: false, more: undefined };
+			}
+
+			const mergedLog: GitReflog = {
+				repoPath: reflog.repoPath,
+				records: [...reflog.records, ...moreLog.records],
+				count: reflog.count + moreLog.count,
+				total: reflog.total + moreLog.total,
+				limit: (reflog.limit ?? 0) + limit,
+				hasMore: moreLog.hasMore,
+			};
+			if (mergedLog.hasMore) {
+				mergedLog.more = this.getReflogMoreFn(mergedLog, options);
+			}
+
+			return mergedLog;
+		};
+	}
+
 	@log({ exit: true })
 	async getInitialCommitSha(repoPath: string): Promise<string | undefined> {
 		try {
-			const data = await this.git.rev_list(repoPath, 'HEAD', { maxParents: 0 });
-			return data?.[0];
+			const data = await this.git.exec(
+				{ cwd: repoPath, errors: GitErrorHandling.Ignore },
+				'rev-list',
+				`--max-parents=0`,
+				'HEAD',
+				'--',
+			);
+			return data?.trim().split('\n')?.[0];
 		} catch {
 			return undefined;
 		}
 	}
 
 	@log()
-	getLeftRightCommitCount(
+	async getLeftRightCommitCount(
 		repoPath: string,
 		range: GitRevisionRange,
 		options?: { authors?: GitUser[] | undefined; excludeMerges?: boolean },
 	): Promise<LeftRightCommitCountResult | undefined> {
-		return this.git.rev_list__left_right(repoPath, range, options?.authors, options?.excludeMerges);
+		const authors = options?.authors?.length ? options.authors.map(a => `--author=^${a.name} <${a.email}>$`) : [];
+
+		const data = await this.git.exec(
+			{ cwd: repoPath, errors: GitErrorHandling.Ignore },
+			'rev-list',
+			'--left-right',
+			'--count',
+			...authors,
+			options?.excludeMerges ? '--no-merges' : undefined,
+			range,
+			'--',
+		);
+		if (!data?.length) return undefined;
+
+		const parts = data.split('\t');
+		if (parts.length !== 2) return undefined;
+
+		const [left, right] = parts;
+		const result = {
+			left: parseInt(left, 10),
+			right: parseInt(right, 10),
+		};
+
+		if (isNaN(result.left) || isNaN(result.right)) return undefined;
+
+		return result;
 	}
 
 	@log()
@@ -195,7 +344,7 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 			];
 
 			if (options?.status !== false) {
-				args.push('--name-status', '--full-history');
+				args.push('--name-status');
 			}
 			if (options?.all) {
 				args.push('--all');
@@ -290,7 +439,7 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 				repoPath,
 				undefined,
 				rev,
-				await this.provider.getCurrentUser(repoPath),
+				await this.provider.config.getCurrentUser(repoPath),
 				limit,
 				false,
 				undefined,
@@ -338,7 +487,7 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 
 		try {
 			const parser = createLogParserSingle('%H');
-			const args = [...parser.arguments, '--full-history'];
+			const args = [...parser.arguments];
 
 			const ordering = options?.ordering ?? configuration.get('advanced.commitOrdering');
 			if (ordering) {
@@ -712,7 +861,7 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 				root,
 				relativePath,
 				rev,
-				await this.provider.getCurrentUser(root),
+				await this.provider.config.getCurrentUser(root),
 				options.limit,
 				options.reverse ?? false,
 				range,
@@ -846,14 +995,21 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 	async hasCommitBeenPushed(repoPath: string, rev: string): Promise<boolean> {
 		if (repoPath == null) return false;
 
-		return this.git.merge_base__is_ancestor(repoPath, rev, '@{u}');
+		return this.isAncestorOf(repoPath, rev, '@{u}');
 	}
 
 	@log()
 	async isAncestorOf(repoPath: string, rev1: string, rev2: string): Promise<boolean> {
 		if (repoPath == null) return false;
 
-		return this.git.merge_base__is_ancestor(repoPath, rev1, rev2);
+		const exitCode = await this.git.exec(
+			{ cwd: repoPath, exitCodeOnly: true },
+			'merge-base',
+			'--is-ancestor',
+			rev1,
+			rev2,
+		);
+		return exitCode === 0;
 	}
 
 	@log<CommitsGitSubProvider['searchCommits']>({
@@ -875,16 +1031,10 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 			const limit = options?.limit ?? configuration.get('advanced.maxSearchItems') ?? 0;
 			const similarityThreshold = configuration.get('advanced.similarityThreshold');
 
-			const currentUser = await this.provider.getCurrentUser(repoPath);
+			const currentUser = await this.provider.config.getCurrentUser(repoPath);
 
-			const { args, files, shas } = getGitArgsFromSearchQuery(search, currentUser);
-
-			args.push(`-M${similarityThreshold == null ? '' : `${similarityThreshold}%`}`, '--');
-			if (files.length !== 0) {
-				args.push(...files);
-			}
-
-			const includeOnlyStashes = args.includes('--no-walk');
+			const { args: searchArgs, files, shas } = getGitArgsFromSearchQuery(search, currentUser);
+			const includeOnlyStashes = searchArgs.includes('--no-walk');
 
 			let stashes: Map<string, GitStashCommit> | undefined;
 			let stdin: string | undefined;
@@ -906,13 +1056,34 @@ export class CommitsGitSubProvider implements GitCommitsSubProvider {
 				}
 			}
 
-			const data = await this.git.log__search(repoPath, shas?.size ? undefined : args, {
-				ordering: configuration.get('advanced.commitOrdering'),
-				...options,
-				limit: limit,
-				shas: shas,
-				stdin: stdin,
-			});
+			let data;
+			if (!shas?.size) {
+				data = await this.git.exec(
+					{ cwd: repoPath, configs: ['-C', repoPath, ...gitLogDefaultConfigs], stdin: stdin },
+					'log',
+					stdin ? '--stdin' : undefined,
+					'--name-status',
+					`--format=${parseGitLogDefaultFormat}`,
+					'--use-mailmap',
+					`-M${similarityThreshold == null ? '' : `${similarityThreshold}%`}`,
+					...searchArgs,
+					options?.ordering ? `--${options.ordering}-order` : undefined,
+					options?.limit ? `-n${options.limit + 1}` : undefined,
+					options?.skip ? `--skip=${options.skip}` : undefined,
+					'--',
+					...files,
+				);
+			} else {
+				data = await this.git.exec(
+					{ cwd: repoPath, stdin: join(shas, '\n') },
+					'show',
+					'--stdin',
+					'--name-status',
+					`--format=${parseGitLogDefaultFormat}`,
+					'--use-mailmap',
+				);
+			}
+
 			const log = parseGitLog(
 				this.container,
 				data,

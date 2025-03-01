@@ -22,8 +22,8 @@ import { getPlatform } from '@env/platform';
 import type { ConnectCloudIntegrationsCommandArgs } from '../../../../commands/cloudIntegrations';
 import type { BranchGitCommandArgs } from '../../../../commands/git/branch';
 import type { DateStyle, GraphBranchesVisibility } from '../../../../config';
-import { GlCommand } from '../../../../constants.commands';
 import type { SearchQuery } from '../../../../constants.search';
+import type { FeaturePreviews } from '../../../../features';
 import type { Subscription } from '../../../../plus/gk/models/subscription';
 import { isSubscriptionPaid } from '../../../../plus/gk/utils/subscription.utils';
 import type { LaunchpadCommandArgs } from '../../../../plus/launchpad/launchpad';
@@ -183,6 +183,7 @@ const createIconElements = (): Record<string, ReactElement> => {
 		'issue-github',
 		'issue-gitlab',
 		'issue-jiraCloud',
+		'issue-azureDevops',
 	];
 
 	const miniIconList = ['upstream-ahead', 'upstream-behind'];
@@ -266,7 +267,7 @@ export function GraphWrapper({
 	onSearch,
 	onSearchPromise,
 	onSearchOpenInView,
-}: GraphWrapperProps) {
+}: GraphWrapperProps): React.JSX.Element {
 	const graphRef = useRef<GraphContainer>(null);
 
 	const [rows, setRows] = useState(state.rows ?? []);
@@ -1128,7 +1129,7 @@ export function GraphWrapper({
 															'gitlens.plus.cloudIntegrations.connect',
 															{
 																integrationIds: [repo.provider.integration.id],
-																source: 'graph',
+																source: { source: 'graph' },
 															},
 														)}
 													>
@@ -1147,7 +1148,7 @@ export function GraphWrapper({
 											'gitlens.plus.cloudIntegrations.connect',
 											{
 												integrationIds: [repo.provider.integration.id],
-												source: 'graph',
+												source: { source: 'graph' },
 											},
 										)}
 									>
@@ -1274,7 +1275,7 @@ export function GraphWrapper({
 						<GlTooltip placement="bottom">
 							<a
 								className="action-button"
-								href={createCommandLink<BranchGitCommandArgs>(GlCommand.GitCommandsBranch, {
+								href={createCommandLink<BranchGitCommandArgs>('gitlens.gitCommands.branch', {
 									state: {
 										subcommand: 'create',
 										reference: branch,
@@ -1668,8 +1669,8 @@ export function GraphWrapper({
 				featurePreview={featurePreview}
 				featurePreviewCommandLink={
 					featurePreview
-						? createWebviewCommandLink(
-								GlCommand.PlusContinueFeaturePreview,
+						? createWebviewCommandLink<{ feature: FeaturePreviews }>(
+								'gitlens.plus.continueFeaturePreview',
 								state.webviewId,
 								state.webviewInstanceId,
 								{ feature: featurePreview.feature },

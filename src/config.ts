@@ -211,9 +211,15 @@ interface AIConfig {
 	readonly explainChanges: {
 		readonly customInstructions: string;
 	};
+	readonly generateChangelog: {
+		readonly customInstructions: string;
+	};
 	readonly generateCommitMessage: {
 		readonly customInstructions: string;
 		readonly enabled: boolean;
+	};
+	readonly generateStashMessage: {
+		readonly customInstructions: string;
 	};
 	readonly generateCloudPatchMessage: {
 		readonly customInstructions: string;
@@ -222,6 +228,9 @@ interface AIConfig {
 		readonly customInstructions: string;
 	};
 	readonly model: SupportedAIModels | null;
+	readonly modelOptions: {
+		readonly temperature: number;
+	};
 	readonly openai: {
 		readonly url: string | null;
 	};
@@ -364,6 +373,7 @@ export interface GraphConfig {
 		readonly dataType: 'commits' | 'lines';
 		readonly additionalTypes: GraphMinimapMarkersAdditionalTypes[];
 	};
+	readonly multiselect: boolean;
 	readonly onlyFollowFirstParent: boolean;
 	readonly pageItemLimit: number;
 	readonly pullRequests: {
@@ -681,6 +691,7 @@ export interface ViewsCommonConfig {
 			readonly tooltip: string;
 		};
 	};
+	readonly multiselect: boolean;
 	readonly openChangesInMultiDiffEditor: boolean;
 	readonly pageItemLimit: number;
 	readonly scm: {
@@ -891,6 +902,9 @@ export interface RepositoriesViewConfig {
 	readonly showTags: boolean;
 	readonly showUpstreamStatus: boolean;
 	readonly showWorktrees: boolean;
+	readonly worktrees: {
+		readonly viewAs: ViewWorktreesViewAs;
+	};
 }
 
 export interface SearchAndCompareViewConfig {
@@ -916,8 +930,13 @@ export interface TagsViewConfig {
 	readonly reveal: boolean;
 }
 
+export type ViewWorktreesViewAs = 'name' | 'path' | 'relativePath';
+
 export interface WorktreesViewConfig {
 	readonly avatars: boolean;
+	readonly branches: {
+		readonly layout: ViewBranchesLayout;
+	};
 	readonly files: ViewsFilesConfig;
 	readonly pullRequests: {
 		readonly enabled: boolean;
@@ -927,6 +946,9 @@ export interface WorktreesViewConfig {
 	readonly reveal: boolean;
 	readonly showBranchComparison: false | Extract<ViewShowBranchComparison, 'branch'>;
 	readonly showStashes: boolean;
+	readonly worktrees: {
+		readonly viewAs: ViewWorktreesViewAs;
+	};
 }
 
 export interface WorkspacesViewConfig {
@@ -954,6 +976,9 @@ export interface WorkspacesViewConfig {
 	readonly showTags: boolean;
 	readonly showUpstreamStatus: boolean;
 	readonly showWorktrees: boolean;
+	readonly worktrees: {
+		readonly viewAs: ViewWorktreesViewAs;
+	};
 }
 
 export interface ViewsFilesConfig {
@@ -1014,11 +1039,6 @@ export type CoreConfig = {
 		readonly proxy: string;
 		readonly proxySupport: 'fallback' | 'off' | 'on' | 'override';
 		readonly proxyStrictSSL: boolean;
-	};
-	readonly multiDiffEditor: {
-		readonly experimental: {
-			readonly enabled: boolean;
-		};
 	};
 	readonly search: {
 		readonly exclude: Record<string, boolean>;

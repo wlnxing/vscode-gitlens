@@ -1,4 +1,3 @@
-import { GlCommand } from '../constants.commands';
 import type { ViewIds } from '../constants.views';
 import { viewIdsByDefaultContainerId } from '../constants.views';
 import type { Container } from '../container';
@@ -8,10 +7,10 @@ import { GlCommandBase } from './commandBase';
 @command()
 export class ResetViewsLayoutCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(GlCommand.ResetViewsLayout);
+		super('gitlens.resetViewsLayout');
 	}
 
-	async execute() {
+	async execute(): Promise<void> {
 		// Don't use this because it will forcibly show & expand every view
 		// for (const view of viewIds) {
 		// 	void (await executeCoreCommand(`gitlens.views.${view}.resetViewLocation`));

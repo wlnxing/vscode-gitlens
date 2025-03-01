@@ -10,7 +10,7 @@ export async function getQueryArgsFromSearchQuery(
 	search: SearchQuery,
 	operations: Map<SearchOperators, Set<string>>,
 	repoPath: string,
-) {
+): Promise<string[]> {
 	const query = [];
 
 	for (const [op, values] of operations.entries()) {
@@ -22,7 +22,7 @@ export async function getQueryArgsFromSearchQuery(
 			case 'author:': {
 				let currentUser: GitUser | undefined;
 				if (values.has('@me')) {
-					currentUser = await provider.getCurrentUser(repoPath);
+					currentUser = await provider.config.getCurrentUser(repoPath);
 				}
 
 				for (let value of values) {

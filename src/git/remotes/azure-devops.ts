@@ -1,5 +1,5 @@
 import type { Range, Uri } from 'vscode';
-import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks';
+import type { AutolinkReference, DynamicAutolinkReference } from '../../autolinks/models/autolinks';
 import type { Brand, Unbrand } from '../../system/brand';
 import type { Repository } from '../models/repository';
 import type { GkProviderId } from '../models/repositoryIdentities';
@@ -92,7 +92,7 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		return this._autolinks;
 	}
 
-	override get icon() {
+	override get icon(): string {
 		return 'azdo';
 	}
 
@@ -104,7 +104,7 @@ export class AzureDevOpsRemote extends RemoteProvider {
 		return 'azureDevops' satisfies Unbrand<GkProviderId> as Brand<GkProviderId>;
 	}
 
-	get name() {
+	get name(): string {
 		return 'Azure DevOps';
 	}
 

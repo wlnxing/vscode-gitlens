@@ -27,7 +27,7 @@ export class DiffWithRevisionFromCommand extends ActiveEditorCommand {
 		super(GlCommand.DiffWithRevisionFrom);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: DiffWithRevisionFromCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: DiffWithRevisionFromCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 		if (uri == null) return;
 
@@ -85,7 +85,9 @@ export class DiffWithRevisionFromCommand extends ActiveEditorCommand {
 		let renamedTitle: string | undefined;
 
 		// Check to see if this file has been renamed
-		const files = await this.container.git.getDiffStatus(gitUri.repoPath, 'HEAD', ref, { filters: ['R', 'C'] });
+		const files = await this.container.git
+			.diff(gitUri.repoPath)
+			.getDiffStatus('HEAD', ref, { filters: ['R', 'C'] });
 		if (files != null) {
 			const rename = files.find(s => s.path === path);
 			if (rename?.originalPath != null) {

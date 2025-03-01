@@ -4,7 +4,7 @@ import { uuid } from '@env/crypto';
 import type { Response } from '@env/fetch';
 import type { TrackingContext } from '../../constants.telemetry';
 import type { Container } from '../../container';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
 import { debug } from '../../system/decorators/log';
 import type { DeferredEvent, DeferredEventExecutor } from '../../system/event';
 import { promisifyDeferred } from '../../system/event';
@@ -31,7 +31,7 @@ export class AuthenticationConnection implements Disposable {
 		private readonly connection: ServerConnection,
 	) {}
 
-	dispose() {}
+	dispose(): void {}
 
 	abort(): Promise<void> {
 		if (this._cancellationSource == null) return Promise.resolve();
@@ -82,14 +82,14 @@ export class AuthenticationConnection implements Disposable {
 			Uri.parse(`${env.uriScheme}://${this.container.context.extension.id}/${AuthenticationUriPathPrefix}`),
 		);
 
-		const uri = this.container.getGkDevUri(
+		const url = this.container.urls.getGkDevUrl(
 			signUp ? 'register' : 'login',
 			`${scopes.includes('gitlens') ? 'source=gitlens&' : ''}${
 				context != null ? `context=${context}&` : ''
 			}state=${encodeURIComponent(gkstate)}&redirect_uri=${encodeURIComponent(callbackUri.toString(true))}`,
 		);
 
-		if (!(await openUrl(uri.toString(true)))) {
+		if (!(await openUrl(url))) {
 			Logger.error(undefined, scope, 'Opening login URL failed');
 
 			this._pendingStates.delete(scopeKey);
@@ -206,9 +206,7 @@ export class AuthenticationConnection implements Disposable {
 					state: state ?? '',
 				}),
 			},
-			{
-				unAuthenticated: true,
-			},
+			{ token: false },
 		);
 
 		if (!rsp.ok) {

@@ -21,14 +21,14 @@ export class LineHistoryView extends ViewBase<'lineHistory', LineHistoryTrackerN
 	}
 
 	override get canSelectMany(): boolean {
-		return this.container.prereleaseOrDebugging;
+		return configuration.get('views.multiselect');
 	}
 
 	protected override get showCollapseAll(): boolean {
 		return false;
 	}
 
-	protected getRoot() {
+	protected getRoot(): LineHistoryTrackerNode {
 		return new LineHistoryTrackerNode(this);
 	}
 
@@ -56,7 +56,7 @@ export class LineHistoryView extends ViewBase<'lineHistory', LineHistoryTrackerN
 		];
 	}
 
-	protected override filterConfigurationChanged(e: ConfigurationChangeEvent) {
+	protected override filterConfigurationChanged(e: ConfigurationChangeEvent): boolean {
 		const changed = super.filterConfigurationChanged(e);
 		if (
 			!changed &&

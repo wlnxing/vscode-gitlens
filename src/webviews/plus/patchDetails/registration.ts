@@ -4,8 +4,13 @@ import type { Sources } from '../../../constants.telemetry';
 import { executeCommand } from '../../../system/-webview/command';
 import { configuration } from '../../../system/-webview/configuration';
 import { setContext } from '../../../system/-webview/context';
-import type { Serialized } from '../../../system/-webview/serialize';
-import type { WebviewPanelShowCommandArgs, WebviewsController } from '../../webviewsController';
+import type { Serialized } from '../../../system/serialize';
+import type {
+	WebviewPanelShowCommandArgs,
+	WebviewPanelsProxy,
+	WebviewsController,
+	WebviewViewProxy,
+} from '../../webviewsController';
 import type { CreateDraft, State, ViewDraft } from './protocol';
 
 export type ShowCreateDraft = {
@@ -22,7 +27,9 @@ export type ShowViewDraft = {
 
 export type PatchDetailsWebviewShowingArgs = [ShowCreateDraft | ShowViewDraft];
 
-export function registerPatchDetailsWebviewView(controller: WebviewsController) {
+export function registerPatchDetailsWebviewView(
+	controller: WebviewsController,
+): WebviewViewProxy<'gitlens.views.patchDetails', PatchDetailsWebviewShowingArgs, Serialized<State>> {
 	return controller.registerWebviewView<
 		'gitlens.views.patchDetails',
 		State,
@@ -62,7 +69,9 @@ export function registerPatchDetailsWebviewView(controller: WebviewsController) 
 	);
 }
 
-export function registerPatchDetailsWebviewPanel(controller: WebviewsController) {
+export function registerPatchDetailsWebviewPanel(
+	controller: WebviewsController,
+): WebviewPanelsProxy<'gitlens.patchDetails', PatchDetailsWebviewShowingArgs, Serialized<State>> {
 	return controller.registerWebviewPanel<
 		'gitlens.patchDetails',
 		State,

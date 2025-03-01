@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Container } from '../../container';
 import { formatDate, fromNow } from '../../system/date';
 import { memoize } from '../../system/decorators/-webview/memoize';
@@ -35,25 +36,25 @@ export class GitTag implements GitTagReference {
 			: this.formatDateFromNow();
 	}
 
-	get ref() {
+	get ref(): string {
 		return this.name;
 	}
 
 	@memoize<GitTag['formatCommitDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatCommitDate(format?: string | null) {
+	formatCommitDate(format?: string | null): string {
 		return this.commitDate != null ? formatDate(this.commitDate, format ?? 'MMMM Do, YYYY h:mma') : '';
 	}
 
-	formatCommitDateFromNow() {
+	formatCommitDateFromNow(): string {
 		return this.commitDate != null ? fromNow(this.commitDate) : '';
 	}
 
 	@memoize<GitTag['formatDate']>(format => format ?? 'MMMM Do, YYYY h:mma')
-	formatDate(format?: string | null) {
+	formatDate(format?: string | null): string {
 		return this.date != null ? formatDate(this.date, format ?? 'MMMM Do, YYYY h:mma') : '';
 	}
 
-	formatDateFromNow() {
+	formatDateFromNow(): string {
 		return this.date != null ? fromNow(this.date) : '';
 	}
 

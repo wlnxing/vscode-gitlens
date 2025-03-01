@@ -1,5 +1,5 @@
 import type { TextDocumentShowOptions } from 'vscode';
-import type { Autolink } from '../../autolinks';
+import type { Autolink } from '../../autolinks/models/autolinks';
 import type { Config, DateStyle } from '../../config';
 import type { Sources } from '../../constants.telemetry';
 import type { GitCommitIdentityShape, GitCommitStats } from '../../git/models/commit';
@@ -8,8 +8,8 @@ import type { IssueOrPullRequest } from '../../git/models/issueOrPullRequest';
 import type { PullRequestShape } from '../../git/models/pullRequest';
 import type { Repository } from '../../git/models/repository';
 import type { Draft, DraftVisibility } from '../../plus/drafts/models/drafts';
-import type { Serialized } from '../../system/-webview/serialize';
 import type { DateTimeFormat } from '../../system/date';
+import type { Serialized } from '../../system/serialize';
 import type { Change, DraftUserSelection } from '../plus/patchDetails/protocol';
 import type { IpcScope, WebviewState } from '../protocol';
 import { IpcCommand, IpcNotification, IpcRequest } from '../protocol';
@@ -102,6 +102,7 @@ export interface State extends WebviewState {
 	includeRichContent?: boolean;
 
 	commit?: CommitDetails;
+	autolinksEnabled: boolean;
 	autolinkedIssues?: IssueOrPullRequest[];
 	pullRequest?: PullRequestShape;
 	wip?: Wip;

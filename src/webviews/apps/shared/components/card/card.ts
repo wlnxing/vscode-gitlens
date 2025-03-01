@@ -18,6 +18,7 @@ export class GlCard extends LitElement {
 	indicator?:
 		| 'base'
 		| 'active'
+		| 'info'
 		| 'cherry-picking'
 		| 'merging'
 		| 'rebasing'
@@ -50,17 +51,17 @@ export class GlCard extends LitElement {
 
 	private _focusable = false;
 	@property({ type: Boolean, reflect: true })
-	get focusable() {
+	get focusable(): boolean {
 		if (this.href != null) return true;
 		return this._focusable;
 	}
-	set focusable(value) {
+	set focusable(value: boolean) {
 		const oldValue = this._focusable;
 		this._focusable = value;
 		this.requestUpdate('focusable', oldValue);
 	}
 
-	get classNames() {
+	get classNames(): Record<string, boolean> {
 		return {
 			card: true,
 			'card--focusable': this.focusable,
@@ -70,7 +71,7 @@ export class GlCard extends LitElement {
 		};
 	}
 
-	override render() {
+	override render(): unknown {
 		if (this.href != null) {
 			return html`<a part="base" class=${classMap(this.classNames)} href=${this.href}
 				>${this.renderContent()}</a
@@ -89,7 +90,7 @@ export class GlCard extends LitElement {
 		`;
 	}
 
-	override focus(options?: FocusOptions) {
+	override focus(options?: FocusOptions): void {
 		if (this.href != null) {
 			this.shadowRoot?.querySelector('a')?.focus(options);
 		} else {

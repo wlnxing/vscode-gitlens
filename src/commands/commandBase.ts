@@ -2,7 +2,6 @@ import type { TextEditor, TextEditorEdit } from 'vscode';
 import { commands, Disposable } from 'vscode';
 import type { GlCommands } from '../constants.commands';
 import { registerCommand } from '../system/-webview/command';
-import { runSequentially } from '../system/function';
 import type { CommandContext } from './commandContext';
 import type { CommandContextParsingOptions } from './commandContext.utils';
 import { parseCommandContext } from './commandContext.utils';
@@ -25,7 +24,7 @@ export abstract class GlCommandBase implements Disposable {
 		this._disposable = Disposable.from(...subscriptions);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -36,18 +35,8 @@ export abstract class GlCommandBase implements Disposable {
 
 	abstract execute(...args: any[]): any;
 
-	protected _execute(command: string, ...args: any[]): Promise<unknown> {
+	protected _execute(command: GlCommands, ...args: any[]): Promise<unknown> {
 		const [context, rest] = parseCommandContext(command, { ...this.contextParsingOptions }, ...args);
-
-		// If there an array of contexts, then we want to execute the command for each
-		if (Array.isArray(context)) {
-			return runSequentially(
-				this.preExecute,
-				context.map<[CommandContext, ...any[]]>((c: CommandContext) => [c, ...rest]),
-				this,
-			);
-		}
-
 		return this.preExecute(context, ...rest);
 	}
 }
@@ -60,7 +49,7 @@ export abstract class ActiveEditorCommand extends GlCommandBase {
 		return this.execute(context.editor, context.uri, ...args);
 	}
 
-	protected override _execute(command: string, ...args: any[]): any {
+	protected override _execute(command: GlCommands, ...args: any[]): any {
 		return super._execute(command, undefined, ...args);
 	}
 
@@ -68,12 +57,12 @@ export abstract class ActiveEditorCommand extends GlCommandBase {
 }
 
 let lastCommand: { command: string; args: any[] } | undefined = undefined;
-export function getLastCommand() {
+export function getLastCommand(): { command: string; args: any[] } | undefined {
 	return lastCommand;
 }
 
 export abstract class ActiveEditorCachedCommand extends ActiveEditorCommand {
-	protected override _execute(command: string, ...args: any[]): any {
+	protected override _execute(command: GlCommands, ...args: any[]): any {
 		lastCommand = {
 			command: command,
 			args: args,
@@ -107,7 +96,7 @@ export abstract class EditorCommand implements Disposable {
 		this._disposable = Disposable.from(...subscriptions);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 

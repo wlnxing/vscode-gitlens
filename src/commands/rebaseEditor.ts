@@ -1,4 +1,3 @@
-import { GlCommand } from '../constants.commands';
 import type { Container } from '../container';
 import { command } from '../system/-webview/command';
 import { GlCommandBase } from './commandBase';
@@ -6,10 +5,10 @@ import { GlCommandBase } from './commandBase';
 @command()
 export class DisableRebaseEditorCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(GlCommand.DisableRebaseEditor);
+		super('gitlens.disableRebaseEditor');
 	}
 
-	execute() {
+	execute(): Promise<void> {
 		return this.container.rebaseEditor.setEnabled(false);
 	}
 }
@@ -17,10 +16,10 @@ export class DisableRebaseEditorCommand extends GlCommandBase {
 @command()
 export class EnableRebaseEditorCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super(GlCommand.EnableRebaseEditor);
+		super('gitlens.enableRebaseEditor');
 	}
 
-	execute() {
+	execute(): Promise<void> {
 		return this.container.rebaseEditor.setEnabled(true);
 	}
 }

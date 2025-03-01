@@ -91,7 +91,10 @@ export class BranchesNode extends CacheableChildrenViewNode<'branches', ViewsWit
 			}
 
 			if (branchNodes.length === 0) return [new MessageNode(this.view, this, 'No branches could be found.')];
-			if (this.view.config.branches.layout === 'list') return branchNodes;
+			if (this.view.config.branches.layout === 'list') {
+				this.children = branchNodes;
+				return branchNodes;
+			}
 
 			const hierarchy = makeHierarchical(
 				branchNodes,
@@ -128,7 +131,7 @@ export class BranchesNode extends CacheableChildrenViewNode<'branches', ViewsWit
 	}
 
 	@debug()
-	override refresh() {
+	override refresh(): void {
 		super.refresh(true);
 	}
 }

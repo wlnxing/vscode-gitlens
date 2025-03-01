@@ -1,6 +1,8 @@
+import type { AIModel } from '../../ai/aiProviderService';
 import type { IntegrationDescriptor } from '../../constants.integrations';
 import type { GitBranchMergedStatus } from '../../git/gitProvider';
 import type { GitBranchStatus, GitTrackingState } from '../../git/models/branch';
+import type { GitDiffFileStats } from '../../git/models/diff';
 import type { Issue } from '../../git/models/issue';
 import type { MergeConflict } from '../../git/models/mergeConflict';
 import type { GitPausedOperationStatus } from '../../git/models/pausedOperationStatus';
@@ -26,16 +28,17 @@ export interface State extends WebviewState {
 	integrationBannerCollapsed: boolean;
 	hasAnyIntegrationConnected: boolean;
 	integrations: IntegrationState[];
+	ai: { model: AIModel | undefined };
 	avatar?: string;
 	organizationsCount?: number;
-	walkthroughProgress: {
+	walkthroughProgress?: {
 		doneCount: number;
 		allCount: number;
 		progress: number;
 	};
-	showWalkthroughProgress?: boolean;
 	previewEnabled: boolean;
 	newInstall: boolean;
+	amaBannerCollapsed: boolean;
 }
 
 export interface IntegrationState extends IntegrationDescriptor {
@@ -49,7 +52,7 @@ export interface OverviewFilters {
 	recent: {
 		threshold: OverviewRecentThreshold;
 	};
-	stale: { threshold: OverviewStaleThreshold; show: boolean };
+	stale: { threshold: OverviewStaleThreshold; show: boolean; limit: number };
 }
 
 // REQUESTS
@@ -62,10 +65,6 @@ export const GetLaunchpadSummary = new IpcRequest<GetLaunchpadSummaryRequest, Ge
 	scope,
 	'launchpad/summary',
 );
-
-export interface GetOverviewRequest {
-	[key: string]: unknown;
-}
 
 export interface GetOverviewBranch {
 	reference: GitBranchReference;
@@ -81,11 +80,7 @@ export interface GetOverviewBranch {
 
 	wip?: Promise<
 		| {
-				workingTreeState?: {
-					added: number;
-					changed: number;
-					deleted: number;
-				};
+				workingTreeState?: GitDiffFileStats;
 				hasConflicts?: boolean;
 				conflictsCount?: number;
 				pausedOpStatus?: GitPausedOperationStatus;
@@ -189,32 +184,43 @@ export interface GetOverviewBranch {
 		uri: string;
 	};
 }
-export interface GetOverviewBranches {
-	active: GetOverviewBranch[];
-	recent: GetOverviewBranch[];
-	stale: GetOverviewBranch[];
+
+export interface OverviewRepository {
+	name: string;
+	path: string;
+	provider?: {
+		name: string;
+		icon?: string;
+		url?: string;
+	};
 }
 
-export type GetOverviewResponse =
+// TODO: look at splitting off selected repo
+export type GetActiveOverviewResponse =
 	| {
-			repository: {
-				name: string;
-				path: string;
-				provider?: {
-					name: string;
-					icon?: string;
-					url?: string;
-				};
-				branches: GetOverviewBranches;
-			};
+			repository: OverviewRepository;
+			active: GetOverviewBranch;
 	  }
 	| undefined;
-export const GetOverview = new IpcRequest<GetOverviewRequest, GetOverviewResponse>(scope, 'overview');
+
+export const GetActiveOverview = new IpcRequest<undefined, GetActiveOverviewResponse>(scope, 'overview/active');
+
+// TODO: look at splitting off selected repo
+export type GetInactiveOverviewResponse =
+	| {
+			repository: OverviewRepository;
+			recent: GetOverviewBranch[];
+			stale?: GetOverviewBranch[];
+	  }
+	| undefined;
+
+export const GetInactiveOverview = new IpcRequest<undefined, GetInactiveOverviewResponse>(scope, 'overview/inactive');
 
 export type GetOverviewFilterStateResponse = OverviewFilters;
 export const GetOverviewFilterState = new IpcRequest<void, GetOverviewFilterStateResponse>(scope, 'overviewFilter');
 
-export const ChangeOverviewRepository = new IpcRequest<undefined, undefined>(scope, 'overview/repository/change');
+export const ChangeOverviewRepositoryCommand = new IpcCommand<undefined>(scope, 'overview/repository/change');
+export const DidChangeOverviewRepository = new IpcNotification<undefined>(scope, 'overview/repository/didChange');
 
 // COMMANDS
 
@@ -280,6 +286,7 @@ export const DidChangeWalkthroughProgress = new IpcNotification<DidChangeProgres
 export interface DidChangeIntegrationsParams {
 	hasAnyIntegrationConnected: boolean;
 	integrations: IntegrationState[];
+	ai: { model: AIModel | undefined };
 }
 export const DidChangeIntegrationsConnections = new IpcNotification<DidChangeIntegrationsParams>(
 	scope,
@@ -314,4 +321,9 @@ export interface BranchRef {
 	repoPath: string;
 	branchId: string;
 	branchName: string;
+}
+
+export interface BranchAndTargetRefs extends BranchRef {
+	mergeTargetId: string;
+	mergeTargetName: string;
 }

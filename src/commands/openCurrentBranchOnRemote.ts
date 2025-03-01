@@ -15,10 +15,10 @@ import type { OpenOnRemoteCommandArgs } from './openOnRemote';
 @command()
 export class OpenCurrentBranchOnRemoteCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super(GlCommand.OpenCurrentBranchOnRemote);
+		super('gitlens.openCurrentBranchOnRemote');
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri) {
+	async execute(editor?: TextEditor, uri?: Uri): Promise<void> {
 		uri = getCommandUri(uri, editor);
 
 		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;

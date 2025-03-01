@@ -10,9 +10,9 @@ import { isSha } from '../git/utils/revision.utils';
 import { showGenericErrorMessage } from '../messages';
 import { showReferencePicker } from '../quickpicks/referencePicker';
 import { command, executeCommand } from '../system/-webview/command';
-import { UriComparer } from '../system/comparers';
 import { Logger } from '../system/logger';
 import { pad, splitSingle } from '../system/string';
+import { uriEquals } from '../system/uri';
 import { StatusFileNode } from '../views/nodes/statusFileNode';
 import { ActiveEditorCommand } from './commandBase';
 import { getCommandUri } from './commandBase.utils';
@@ -34,7 +34,7 @@ export class OpenFileOnRemoteCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
 		super([
 			GlCommand.OpenFileOnRemote,
-			GlCommand.Deprecated_OpenFileInRemote,
+			/** @deprecated */ 'gitlens.openFileInRemote',
 			GlCommand.CopyRemoteFileUrl,
 			GlCommand.CopyRemoteFileUrlWithoutRange,
 			GlCommand.OpenFileOnRemoteFrom,
@@ -42,7 +42,7 @@ export class OpenFileOnRemoteCommand extends ActiveEditorCommand {
 		]);
 	}
 
-	protected override async preExecute(context: CommandContext, args?: OpenFileOnRemoteCommandArgs) {
+	protected override async preExecute(context: CommandContext, args?: OpenFileOnRemoteCommandArgs): Promise<void> {
 		let uri = context.uri;
 
 		if (context.type === 'editorLine') {
@@ -107,7 +107,7 @@ export class OpenFileOnRemoteCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: OpenFileOnRemoteCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: OpenFileOnRemoteCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 		if (uri == null) return;
 
@@ -121,7 +121,7 @@ export class OpenFileOnRemoteCommand extends ActiveEditorCommand {
 
 			let range: Range | undefined;
 			if (args.range) {
-				if (editor != null && UriComparer.equals(editor.document.uri, uri)) {
+				if (editor != null && uriEquals(editor.document.uri, uri)) {
 					range = new Range(
 						editor.selection.start.with({ line: editor.selection.start.line + 1 }),
 						editor.selection.end.with({

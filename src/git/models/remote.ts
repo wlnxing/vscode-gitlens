@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Container } from '../../container';
 import type { HostingIntegration } from '../../plus/integrations/integration';
 import { memoize } from '../../system/decorators/-webview/memoize';
@@ -21,19 +22,19 @@ export class GitRemote<TProvider extends RemoteProvider | undefined = RemoteProv
 		public readonly urls: { type: GitRemoteType; url: string }[],
 	) {}
 
-	get default() {
+	get default(): boolean {
 		const defaultRemote = this.container.storage.getWorkspace('remote:default');
 		// Check for `this.remoteKey` matches to handle previously saved data
 		return this.name === defaultRemote || this.remoteKey === defaultRemote;
 	}
 
 	@memoize()
-	get domain() {
+	get domain(): string {
 		return this.provider?.domain ?? this._domain;
 	}
 
 	@memoize()
-	get id() {
+	get id(): string {
 		return `${this.name}/${this.remoteKey}`;
 	}
 
@@ -42,12 +43,12 @@ export class GitRemote<TProvider extends RemoteProvider | undefined = RemoteProv
 	}
 
 	@memoize()
-	get path() {
+	get path(): string {
 		return this.provider?.path ?? this._path;
 	}
 
 	@memoize()
-	get remoteKey() {
+	get remoteKey(): string {
 		return this._domain ? `${this._domain}/${this._path}` : this.path;
 	}
 
@@ -86,7 +87,7 @@ export class GitRemote<TProvider extends RemoteProvider | undefined = RemoteProv
 		return equalsIgnoreCase(urlOrDomain, this.domain) && equalsIgnoreCase(path, this.path);
 	}
 
-	async setAsDefault(value: boolean = true) {
+	async setAsDefault(value: boolean = true): Promise<void> {
 		await this.container.git.remotes(this.repoPath).setRemoteAsDefault(this.name, value);
 	}
 }

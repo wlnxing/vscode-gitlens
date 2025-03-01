@@ -1,15 +1,21 @@
 import { provide } from '@lit/context';
+import type { ReactiveControllerHost } from 'lit';
 import { html, LitElement } from 'lit';
 import { property } from 'lit/decorators.js';
 import type { CustomEditorIds, WebviewIds, WebviewViewIds } from '../../../constants.views';
-import type { Deferrable } from '../../../system/function';
-import { debounce } from '../../../system/function';
+import type { Deferrable } from '../../../system/function/debounce';
+import { debounce } from '../../../system/function/debounce';
 import type { WebviewFocusChangedParams } from '../../protocol';
 import { DidChangeWebviewFocusNotification, WebviewFocusChangedCommand, WebviewReadyCommand } from '../../protocol';
 import { GlElement } from './components/element';
-import { ipcContext, LoggerContext, loggerContext, telemetryContext, TelemetryContext } from './context';
+import { ipcContext } from './contexts/ipc';
+import { loggerContext, LoggerContext } from './contexts/logger';
+import { promosContext, PromosContext } from './contexts/promos';
+import { telemetryContext, TelemetryContext } from './contexts/telemetry';
 import type { Disposable } from './events';
 import { HostIpc } from './ipc';
+
+export type ReactiveElementHost = ReactiveControllerHost & HTMLElement;
 
 export interface StateProvider<State> extends Disposable {
 	readonly state: State;
@@ -36,13 +42,16 @@ export abstract class GlApp<
 	@provide({ context: loggerContext })
 	protected _logger!: LoggerContext;
 
+	@provide({ context: promosContext })
+	protected _promos!: PromosContext;
+
 	@provide({ context: telemetryContext })
 	protected _telemetry!: TelemetryContext;
 
 	@property({ type: Object, noAccessor: true })
 	private bootstrap!: State;
 
-	get state() {
+	get state(): State {
 		return this._stateProvider.state;
 	}
 
@@ -53,9 +62,9 @@ export abstract class GlApp<
 	private _stateProvider!: StateProvider<State>;
 
 	protected abstract createStateProvider(state: State, ipc: HostIpc): StateProvider<State>;
-	protected onPersistState(_state: State) {}
+	protected onPersistState(_state: State): void {}
 
-	override connectedCallback() {
+	override connectedCallback(): void {
 		super.connectedCallback();
 
 		this._logger = new LoggerContext(this.name);
@@ -78,6 +87,7 @@ export abstract class GlApp<
 				}
 			}),
 			this._ipc,
+			(this._promos = new PromosContext(this._ipc)),
 			(this._telemetry = new TelemetryContext(this._ipc)),
 		);
 		this._ipc.sendCommand(WebviewReadyCommand, undefined);
@@ -103,7 +113,7 @@ export abstract class GlApp<
 		}
 	}
 
-	override disconnectedCallback() {
+	override disconnectedCallback(): void {
 		super.disconnectedCallback();
 
 		this._logger.log('disconnected');
@@ -113,7 +123,7 @@ export abstract class GlApp<
 		this.disposables.forEach(d => d.dispose());
 	}
 
-	override render() {
+	override render(): unknown {
 		return html`<slot></slot>`;
 	}
 

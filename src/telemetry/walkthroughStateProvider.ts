@@ -1,5 +1,6 @@
 import type { Event } from 'vscode';
 import { Disposable, EventEmitter } from 'vscode';
+import type { GlCommands } from '../constants.commands';
 import { GlCommand } from '../constants.commands';
 import { SubscriptionState } from '../constants.subscription';
 import type { TrackedUsageKeys } from '../constants.telemetry';
@@ -31,8 +32,8 @@ const triedProStates: Readonly<SubscriptionState[]> = [
 ];
 
 const tryProCommands: Readonly<TrackedUsageKeys[]> = [
-	`command:${GlCommand.PlusStartPreviewTrial}:executed`,
-	`command:${GlCommand.PlusReactivateProTrial}:executed`,
+	`command:${'gitlens.plus.startPreviewTrial' satisfies GlCommands}:executed`,
+	`command:${'gitlens.plus.reactivateProTrial' satisfies GlCommands}:executed`,
 ];
 
 const walkthroughRequiredMapping: Readonly<Map<WalkthroughContextKeys, WalkthroughUsage>> = new Map<
@@ -73,7 +74,7 @@ const walkthroughRequiredMapping: Readonly<Map<WalkthroughContextKeys, Walkthrou
 			usage: [
 				'launchpadView:shown',
 				'worktreesView:shown',
-				`command:${GlCommand.ShowLaunchpad}:executed`,
+				`command:${'gitlens.showLaunchpad' satisfies GlCommands}:executed`,
 				`command:${GlCommand.ShowLaunchpadView}:executed`,
 				`command:${GlCommand.GitCommandsWorktree}:executed`,
 				`command:${GlCommand.GitCommandsWorktreeCreate}:executed`,
@@ -94,7 +95,7 @@ const walkthroughRequiredMapping: Readonly<Map<WalkthroughContextKeys, Walkthrou
 				`command:${GlCommand.ShowDraftsView}:executed`,
 				`command:${GlCommand.ShowPatchDetailsPage}:executed`,
 				`command:${GlCommand.CreateCloudPatch}:executed`,
-				`command:${GlCommand.CreatePatch}:executed`,
+				`command:${'gitlens.createPatch' satisfies GlCommands}:executed`,
 			],
 		},
 	],
@@ -102,8 +103,8 @@ const walkthroughRequiredMapping: Readonly<Map<WalkthroughContextKeys, Walkthrou
 		WalkthroughContextKeys.Integrations,
 		{
 			usage: [
-				`command:${GlCommand.PlusConnectCloudIntegrations}:executed`,
-				`command:${GlCommand.PlusManageCloudIntegrations}:executed`,
+				`command:${'gitlens.plus.cloudIntegrations.connect' satisfies GlCommands}:executed`,
+				`command:${'gitlens.plus.cloudIntegrations.manage' satisfies GlCommands}:executed`,
 			],
 		},
 	],
@@ -220,11 +221,11 @@ export class WalkthroughStateProvider implements Disposable {
 		void setContext(`gitlens:walkthroughState:${key}`, true);
 	}
 
-	get doneCount() {
+	get doneCount(): number {
 		return this.completed.size;
 	}
 
-	get progress() {
+	get progress(): number {
 		return this.doneCount / this.walkthroughSize;
 	}
 

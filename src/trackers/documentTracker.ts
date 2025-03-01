@@ -19,11 +19,11 @@ import { RepositoryChange, RepositoryChangeComparisonMode } from '../git/models/
 import { configuration } from '../system/-webview/configuration';
 import { setContext } from '../system/-webview/context';
 import { UriSet } from '../system/-webview/uriMap';
-import { findTextDocument, isVisibleDocument } from '../system/-webview/utils';
+import { findTextDocument, isVisibleDocument } from '../system/-webview/vscode';
 import { debug } from '../system/decorators/log';
 import { once } from '../system/event';
-import type { Deferrable } from '../system/function';
-import { debounce } from '../system/function';
+import type { Deferrable } from '../system/function/debounce';
+import { debounce } from '../system/function/debounce';
 import type { TrackedGitDocument } from './trackedDocument';
 import { createTrackedGitDocument } from './trackedDocument';
 
@@ -94,7 +94,7 @@ export class GitDocumentTracker implements Disposable {
 		this._dirtyIdleTriggerDelay = configuration.get('advanced.blame.delayAfterEdit');
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 
 		void this.clear();
@@ -193,10 +193,8 @@ export class GitDocumentTracker implements Disposable {
 
 		let debouncedChange = this.debouncedTextDocumentChanges.get(e.document);
 		if (debouncedChange == null) {
-			debouncedChange = debounce(
-				e => this.onTextDocumentChangedCore(e),
-				50,
-				([prev]: [TextDocumentChangeEvent], [next]: [TextDocumentChangeEvent]) => {
+			debouncedChange = debounce(e => this.onTextDocumentChangedCore(e), 50, {
+				aggregator: ([prev]: [TextDocumentChangeEvent], [next]: [TextDocumentChangeEvent]) => {
 					return [
 						{
 							...next,
@@ -205,7 +203,7 @@ export class GitDocumentTracker implements Disposable {
 						} satisfies TextDocumentChangeEvent,
 					];
 				},
-			);
+			});
 			this.debouncedTextDocumentChanges.set(e.document, debouncedChange);
 		}
 
@@ -339,7 +337,7 @@ export class GitDocumentTracker implements Disposable {
 	}
 
 	@debug()
-	async clear() {
+	async clear(): Promise<void> {
 		for (const d of this._documentMap.values()) {
 			(await d).dispose();
 		}
@@ -419,7 +417,7 @@ export class GitDocumentTracker implements Disposable {
 	private readonly _openUrisTracked = new UriSet();
 	private _updateContextDebounced: Deferrable<() => void> | undefined;
 
-	updateContext(uri: Uri, blameable: boolean, tracked: boolean) {
+	updateContext(uri: Uri, blameable: boolean, tracked: boolean): void {
 		let changed = false;
 
 		function updateContextCore(this: GitDocumentTracker, uri: Uri, blameable: boolean, tracked: boolean) {

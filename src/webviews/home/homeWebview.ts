@@ -1,7 +1,8 @@
 import type { ConfigurationChangeEvent } from 'vscode';
 import { Disposable, Uri, window, workspace } from 'vscode';
+import type { AIModelChangeEvent } from '../../ai/aiProviderService';
 import type { CreatePullRequestActionContext } from '../../api/gitlens';
-import type { EnrichedAutolink } from '../../autolinks';
+import type { EnrichedAutolink } from '../../autolinks/models/autolinks';
 import { getAvatarUriFromGravatarEmail } from '../../avatars';
 import type { BranchGitCommandArgs } from '../../commands/git/branch';
 import type { OpenPullRequestOnRemoteCommandArgs } from '../../commands/openPullRequestOnRemote';
@@ -25,7 +26,7 @@ import type { Issue } from '../../git/models/issue';
 import type { GitPausedOperationStatus } from '../../git/models/pausedOperationStatus';
 import type { PullRequest } from '../../git/models/pullRequest';
 import { RemoteResourceType } from '../../git/models/remoteResource';
-import type { Repository } from '../../git/models/repository';
+import type { Repository, RepositoryFileSystemChangeEvent } from '../../git/models/repository';
 import { RepositoryChange, RepositoryChangeComparisonMode } from '../../git/models/repository';
 import { uncommitted } from '../../git/models/revision';
 import type { GitStatus } from '../../git/models/status';
@@ -41,6 +42,8 @@ import { showPatchesView } from '../../plus/drafts/actions';
 import type { Subscription } from '../../plus/gk/models/subscription';
 import type { SubscriptionChangeEvent } from '../../plus/gk/subscriptionService';
 import { isSubscriptionStatePaidOrTrial } from '../../plus/gk/utils/subscription.utils';
+import type { ConfiguredIntegrationsChangeEvent } from '../../plus/integrations/authentication/configuredIntegrationService';
+import { providersMetadata } from '../../plus/integrations/providers/models';
 import type { LaunchpadCategorizedResult } from '../../plus/launchpad/launchpadProvider';
 import { getLaunchpadItemGroups } from '../../plus/launchpad/launchpadProvider';
 import { getLaunchpadSummary } from '../../plus/launchpad/utils/-webview/launchpad.utils';
@@ -54,24 +57,26 @@ import {
 } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
 import { getContext, onDidChangeContext } from '../../system/-webview/context';
-import { openUrl, openWorkspace } from '../../system/-webview/utils';
+import { openUrl, openWorkspace } from '../../system/-webview/vscode';
 import { debug } from '../../system/decorators/log';
-import type { Deferrable } from '../../system/function';
-import { debounce } from '../../system/function';
+import type { Deferrable } from '../../system/function/debounce';
+import { debounce } from '../../system/function/debounce';
 import { filterMap } from '../../system/iterable';
 import { getSettledValue } from '../../system/promise';
+import { SubscriptionManager } from '../../system/subscriptionManager';
 import type { ShowInCommitGraphCommandArgs } from '../plus/graph/protocol';
 import type { Change } from '../plus/patchDetails/protocol';
 import type { IpcMessage } from '../protocol';
 import type { WebviewHost, WebviewProvider, WebviewShowingArgs } from '../webviewProvider';
 import type { WebviewShowOptions } from '../webviewsController';
 import type {
+	BranchAndTargetRefs,
 	BranchRef,
 	CollapseSectionParams,
 	DidChangeRepositoriesParams,
+	GetActiveOverviewResponse,
+	GetInactiveOverviewResponse,
 	GetOverviewBranch,
-	GetOverviewBranches,
-	GetOverviewResponse,
 	IntegrationState,
 	OpenInGraphParams,
 	OverviewFilters,
@@ -80,12 +85,13 @@ import type {
 	State,
 } from './protocol';
 import {
-	ChangeOverviewRepository,
+	ChangeOverviewRepositoryCommand,
 	CollapseSectionCommand,
 	DidChangeIntegrationsConnections,
 	DidChangeLaunchpad,
 	DidChangeOrgSettings,
 	DidChangeOverviewFilter,
+	DidChangeOverviewRepository,
 	DidChangePreviewEnabled,
 	DidChangeRepositories,
 	DidChangeRepositoryWip,
@@ -94,8 +100,9 @@ import {
 	DidCompleteDiscoveringRepositories,
 	DidFocusAccount,
 	DismissWalkthroughSection,
+	GetActiveOverview,
+	GetInactiveOverview,
 	GetLaunchpadSummary,
-	GetOverview,
 	GetOverviewFilterState,
 	OpenInGraphCommand,
 	SetOverviewFilter,
@@ -109,10 +116,6 @@ const emptyDisposable = Object.freeze({
 	},
 });
 
-interface RepositorySubscription {
-	repo: Repository;
-	subscription?: Disposable;
-}
 interface RepositoryBranchData {
 	repo: Repository;
 	branches: GitBranch[];
@@ -127,10 +130,20 @@ type LaunchpadItemInfo = Awaited<NonNullable<Awaited<GetOverviewBranch['pr']>>['
 type PullRequestInfo = Awaited<GetOverviewBranch['pr']>;
 type WipInfo = Awaited<GetOverviewBranch['wip']>;
 
+const thresholdValues: Record<OverviewStaleThreshold | OverviewRecentThreshold, number> = {
+	OneDay: 1000 * 60 * 60 * 24 * 1,
+	OneWeek: 1000 * 60 * 60 * 24 * 7,
+	OneMonth: 1000 * 60 * 60 * 24 * 30,
+	OneYear: 1000 * 60 * 60 * 24 * 365,
+};
+
 export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWebviewShowingArgs> {
 	private readonly _disposable: Disposable;
 	private _discovering: Promise<number | undefined> | undefined;
 	private _etag?: number;
+	private _etagFileSystem?: number;
+	private _etagRepository?: number;
+	private _etagSubscription?: number;
 	private _pendingFocusAccount = false;
 
 	constructor(
@@ -144,14 +157,15 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 				: emptyDisposable,
 			this.container.subscription.onDidChange(this.onSubscriptionChanged, this),
 			onDidChangeContext(this.onContextChanged, this),
-			this.container.integrations.onDidChangeConnectionState(this.onChangeConnectionState, this),
+			this.container.integrations.onDidChangeConfiguredIntegrations(this.onIntegrationsChanged, this),
 			this.container.walkthrough.onProgressChanged(this.onWalkthroughChanged, this),
 			configuration.onDidChange(this.onDidChangeConfig, this),
 			this.container.launchpad.onDidChange(this.onDidLaunchpadChange, this),
+			this.container.ai.onDidChangeModel(this.onAIModelChanged, this),
 		);
 	}
 
-	dispose() {
+	dispose(): void {
 		this._disposable.dispose();
 	}
 
@@ -169,6 +183,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		stale: {
 			threshold: 'OneYear',
 			show: false,
+			limit: 9,
 		},
 	};
 
@@ -203,7 +218,11 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		this.notifyDidCompleteDiscoveringRepositories();
 	}
 
-	private onChangeConnectionState() {
+	private onAIModelChanged(_e: AIModelChangeEvent) {
+		void this.notifyDidChangeIntegrations();
+	}
+
+	private onIntegrationsChanged(_e: ConfiguredIntegrationsChangeEvent) {
 		void this.notifyDidChangeIntegrations();
 	}
 
@@ -225,7 +244,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 		if (pick == null || pick === currentRepo) return;
 
-		this.selectRepository(pick.path);
+		return this.selectRepository(pick.path);
 	}
 
 	private onRepositoriesChanged() {
@@ -326,7 +345,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		void this.host.notify(DidChangeOverviewFilter, { filter: this._overviewBranchFilter });
 	}
 
-	async onMessageReceived(e: IpcMessage) {
+	async onMessageReceived(e: IpcMessage): Promise<void> {
 		switch (true) {
 			case CollapseSectionCommand.is(e):
 				this.onCollapseSection(e.params);
@@ -340,21 +359,24 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			case GetLaunchpadSummary.is(e):
 				void this.host.respond(GetLaunchpadSummary, e, await getLaunchpadSummary(this.container));
 				break;
-			case GetOverview.is(e):
-				void this.host.respond(GetOverview, e, await this.getBranchOverview());
-				break;
 			case GetOverviewFilterState.is(e):
 				void this.host.respond(GetOverviewFilterState, e, this._overviewBranchFilter);
 				break;
-			case ChangeOverviewRepository.is(e):
-				await this.onChooseRepository();
-				void this.host.respond(ChangeOverviewRepository, e, undefined);
+			case ChangeOverviewRepositoryCommand.is(e):
+				if ((await this.onChooseRepository()) == null) return;
+				void this.host.notify(DidChangeOverviewRepository, undefined);
 				break;
 			case TogglePreviewEnabledCommand.is(e):
 				this.onTogglePreviewEnabled();
 				break;
 			case OpenInGraphCommand.is(e):
 				this.openInGraph(e.params);
+				break;
+			case GetActiveOverview.is(e):
+				void this.host.respond(GetActiveOverview, e, await this.getActiveBranchOverview());
+				break;
+			case GetInactiveOverview.is(e):
+				void this.host.respond(GetInactiveOverview, e, await this.getInactiveBranchOverview());
 				break;
 		}
 	}
@@ -363,17 +385,17 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		return this.getState();
 	}
 
-	onRefresh() {
+	onRefresh(): void {
 		this.resetBranchOverview();
 		this.notifyDidChangeRepositories();
 	}
 
-	onReloaded() {
+	onReloaded(): void {
 		this.onRefresh();
 		this.notifyDidChangeProgress();
 	}
 
-	onReady() {
+	onReady(): void {
 		if (this._pendingFocusAccount === true) {
 			this._pendingFocusAccount = false;
 
@@ -381,16 +403,34 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		}
 	}
 
-	onVisibilityChanged(visible: boolean) {
+	private hasRepositoryChanged(): boolean {
+		if (this._repositorySubscription?.source != null) {
+			if (
+				this._repositorySubscription.source.etag !== this._etagRepository ||
+				this._repositorySubscription.source.etagFileSystem !== this._etagFileSystem
+			) {
+				return true;
+			}
+		} else if (this._etag !== this.container.git.etag) {
+			return true;
+		}
+
+		return false;
+	}
+
+	onVisibilityChanged(visible: boolean): void {
 		if (!visible) {
-			this.stopRepositorySubscription();
+			this._repositorySubscription?.pause();
 
 			return;
 		}
 
-		this.resumeRepositorySubscription();
+		this._repositorySubscription?.resume();
 
-		if (this._discovering == null && this._etag !== this.container.git.etag) {
+		if (
+			this._discovering == null &&
+			(this.container.subscription.etag !== this._etagSubscription || this.hasRepositoryChanged())
+		) {
 			this.notifyDidChangeRepositories(true);
 		}
 	}
@@ -457,7 +497,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 	private startWork() {
 		this.container.telemetry.sendEvent('home/startWork');
-		void executeCommand<StartWorkCommandArgs>(GlCommand.StartWork, {
+		void executeCommand<StartWorkCommandArgs>('gitlens.startWork', {
 			command: 'startWork',
 			source: 'home',
 		});
@@ -501,7 +541,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 	private async openRebaseEditor(pausedOpArgs: GitPausedOperationStatus) {
 		if (pausedOpArgs.type !== 'rebase') return;
 
-		const gitDir = await this.container.git.getGitDir(pausedOpArgs.repoPath);
+		const gitDir = await this.container.git.config(pausedOpArgs.repoPath).getGitDir?.();
 		if (gitDir == null) return;
 
 		const rebaseTodoUri = Uri.joinPath(gitDir.uri, 'rebase-merge', 'git-rebase-todo');
@@ -594,11 +634,17 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 	}
 
 	private getWalkthroughDismissed() {
-		return Boolean(this.container.storage.get('home:walkthrough:dismissed'));
+		return this.container.storage.get('home:walkthrough:dismissed') ?? false;
 	}
 
 	private getPreviewCollapsed() {
 		return this.container.storage.get('home:sections:collapsed')?.includes('newHomePreview') ?? false;
+	}
+
+	private getAmaBannerCollapsed() {
+		if (Date.now() >= new Date('2025-02-13T13:00:00-05:00').getTime()) return true;
+
+		return this.container.storage.get('home:sections:collapsed')?.includes('feb2025AmaBanner') ?? false;
 	}
 
 	private getIntegrationBannerCollapsed() {
@@ -618,17 +664,20 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 	}
 
 	private async onSubscriptionChanged(e: SubscriptionChangeEvent) {
+		if (e.etag === this._etagSubscription) return;
+
 		await this.notifyDidChangeSubscription(e.current);
 
 		if (isSubscriptionStatePaidOrTrial(e.current.state) !== isSubscriptionStatePaidOrTrial(e.previous.state)) {
-			this.onOverviewRepoChanged('repo');
+			this.onOverviewRepoChanged();
 		}
 	}
 
 	private async getState(subscription?: Subscription): Promise<State> {
-		const [subResult, integrationResult] = await Promise.allSettled([
+		const [subResult, integrationResult, aiModelResult] = await Promise.allSettled([
 			this.getSubscriptionState(subscription),
 			this.getIntegrationStates(true),
+			this.container.ai.getModel({ silent: true }),
 		]);
 
 		if (subResult.status === 'rejected') {
@@ -637,6 +686,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 		const integrations = getSettledValue(integrationResult) ?? [];
 		const anyConnected = integrations.some(i => i.connected);
+		const ai = { model: getSettledValue(aiModelResult) };
 
 		return {
 			...this.host.baseWebviewState,
@@ -650,15 +700,18 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			previewCollapsed: this.getPreviewCollapsed(),
 			integrationBannerCollapsed: this.getIntegrationBannerCollapsed(),
 			integrations: integrations,
+			ai: ai,
 			hasAnyIntegrationConnected: anyConnected,
-			walkthroughProgress: {
-				allCount: this.container.walkthrough.walkthroughSize,
-				doneCount: this.container.walkthrough.doneCount,
-				progress: this.container.walkthrough.progress,
-			},
-			showWalkthroughProgress: !this.getWalkthroughDismissed(),
+			walkthroughProgress: !this.getWalkthroughDismissed()
+				? {
+						allCount: this.container.walkthrough.walkthroughSize,
+						doneCount: this.container.walkthrough.doneCount,
+						progress: this.container.walkthrough.progress,
+				  }
+				: undefined,
 			previewEnabled: this.getPreviewEnabled(),
 			newInstall: getContext('gitlens:install:new', false),
+			amaBannerCollapsed: this.getAmaBannerCollapsed(),
 		};
 	}
 
@@ -675,7 +728,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		};
 	}
 
-	private async getBranchOverview(): Promise<GetOverviewResponse | undefined> {
+	private async getActiveBranchOverview(): Promise<GetActiveOverviewResponse | undefined> {
 		if (this._discovering != null) {
 			await this._discovering;
 		}
@@ -684,25 +737,99 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		if (repo == null) return undefined;
 
 		const forceRepo = this._invalidateOverview === 'repo';
-		const forceWip = this._invalidateOverview !== undefined;
+		const forceWip = this._invalidateOverview === 'wip';
 		const branchesAndWorktrees = await this.getBranchesData(repo, forceRepo);
-		const overviewBranches = getOverviewBranches(branchesAndWorktrees, this.container, this._overviewBranchFilter, {
-			forceActive: forceWip ? true : undefined,
-			isPro: await this.isSubscriptionPro(),
-		});
-		this._invalidateOverview = undefined;
-		if (overviewBranches == null) return undefined;
 
-		const formattedRepo = await this.formatRepository(repo);
+		const { branches, worktreesByBranch } = branchesAndWorktrees;
+		const activeBranch = branches.find(
+			branch => this.getBranchOverviewType(branch, worktreesByBranch) === 'active',
+		)!;
 
-		const result: GetOverviewResponse = {
-			repository: {
-				...formattedRepo,
-				branches: overviewBranches,
+		const isPro = await this.isSubscriptionPro();
+		const [activeOverviewBranch] = getOverviewBranchesCore(
+			[activeBranch],
+			branchesAndWorktrees.worktreesByBranch,
+			isPro,
+			this.container,
+			{
+				isActive: true,
+				forceStatus: forceRepo || forceWip ? true : undefined,
 			},
-		};
+		);
 
-		return result;
+		if (forceWip) {
+			this._invalidateOverview = undefined;
+		}
+
+		this._etagFileSystem = repo.etagFileSystem;
+
+		return {
+			repository: await this.formatRepository(repo),
+			active: activeOverviewBranch,
+		};
+	}
+
+	private async getInactiveBranchOverview(): Promise<GetInactiveOverviewResponse | undefined> {
+		if (this._discovering != null) {
+			await this._discovering;
+		}
+
+		const repo = this.getSelectedRepository();
+		if (repo == null) return undefined;
+
+		const forceRepo = this._invalidateOverview === 'repo';
+		const branchesAndWorktrees = await this.getBranchesData(repo, forceRepo);
+
+		const recentBranches = branchesAndWorktrees.branches.filter(
+			branch => this.getBranchOverviewType(branch, branchesAndWorktrees.worktreesByBranch) === 'recent',
+		);
+
+		let staleBranches: GitBranch[] | undefined;
+		if (this._overviewBranchFilter.stale.show) {
+			sortBranches(branchesAndWorktrees.branches, {
+				missingUpstream: true,
+				orderBy: 'date:asc',
+			});
+
+			for (const branch of branchesAndWorktrees.branches) {
+				if (staleBranches != null && staleBranches.length > this._overviewBranchFilter.stale.limit) {
+					break;
+				}
+				if (recentBranches.some(b => b.id === branch.id)) {
+					continue;
+				}
+
+				if (this.getBranchOverviewType(branch, branchesAndWorktrees.worktreesByBranch) !== 'stale') {
+					continue;
+				}
+
+				staleBranches ??= [];
+				staleBranches.push(branch);
+			}
+		}
+
+		const isPro = await this.isSubscriptionPro();
+		const recentOverviewBranches = getOverviewBranchesCore(
+			recentBranches,
+			branchesAndWorktrees.worktreesByBranch,
+			isPro,
+			this.container,
+		);
+		const staleOverviewBranches =
+			staleBranches == null
+				? undefined
+				: getOverviewBranchesCore(staleBranches, branchesAndWorktrees.worktreesByBranch, isPro, this.container);
+
+		// TODO: revisit invalidation
+		if (!forceRepo) {
+			this._invalidateOverview = undefined;
+		}
+
+		return {
+			repository: await this.formatRepository(repo),
+			recent: recentOverviewBranches,
+			stale: staleOverviewBranches,
+		};
 	}
 
 	private async formatRepository(repo: Repository): Promise<{
@@ -730,7 +857,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		};
 	}
 
-	private _repositorySubscription: RepositorySubscription | undefined;
+	private _repositorySubscription: SubscriptionManager<Repository> | undefined;
 	private selectRepository(repoPath?: string) {
 		let repo: Repository | undefined;
 		if (repoPath != null) {
@@ -742,55 +869,36 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			}
 		}
 
-		if (this._repositorySubscription != null) {
-			this._repositorySubscription.subscription?.dispose();
-			this._repositorySubscription = undefined;
-		}
+		this._repositorySubscription?.dispose();
+		this._repositorySubscription = undefined;
+
 		if (repo != null) {
-			this._repositorySubscription = {
-				repo: repo,
-				subscription: this.subscribeToRepository(repo),
-			};
+			this._repositorySubscription = new SubscriptionManager(repo, r => this.subscribeToRepository(r));
+			// Start the subscription immediately if webview is visible
+			if (this.host.visible) {
+				this._repositorySubscription.start();
+			}
 		}
 
 		return repo;
-	}
-
-	private stopRepositorySubscription() {
-		if (this._repositorySubscription != null) {
-			this._repositorySubscription.subscription?.dispose();
-			this._repositorySubscription.subscription = undefined;
-		}
-	}
-
-	private resumeRepositorySubscription(force = false) {
-		if (this._repositorySubscription == null) {
-			return;
-		}
-
-		if (force || this._repositorySubscription.subscription == null) {
-			this._repositorySubscription.subscription?.dispose();
-			this._repositorySubscription.subscription = undefined;
-			this._repositorySubscription.subscription = this.subscribeToRepository(this._repositorySubscription.repo);
-		}
 	}
 
 	private resetBranchOverview() {
 		this._repositoryBranches.clear();
 
 		if (!this.host.visible) {
-			this.stopRepositorySubscription();
+			this._repositorySubscription?.pause();
 			return;
 		}
 
-		this.resumeRepositorySubscription(true);
+		this._repositorySubscription?.resume();
 	}
 
 	private subscribeToRepository(repo: Repository): Disposable {
 		return Disposable.from(
 			// TODO: advanced configuration for the watchFileSystem timing
 			repo.watchFileSystem(1000),
-			repo.onDidChangeFileSystem(() => this.onOverviewRepoChanged('wip')),
+			repo.onDidChangeFileSystem(e => this.onOverviewWipChanged(e, repo)),
 			repo.onDidChange(e => {
 				if (
 					e.changed(
@@ -804,26 +912,42 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 						RepositoryChangeComparisonMode.Any,
 					)
 				) {
-					this.onOverviewRepoChanged('repo');
+					this.onOverviewRepoChanged(repo);
 				}
 			}),
 		);
 	}
 
 	@debug()
-	private onOverviewRepoChanged(scope: 'repo' | 'wip') {
-		if (this._etag === this.container.git.etag) return;
+	private onOverviewWipChanged(e: RepositoryFileSystemChangeEvent, repository: Repository) {
+		if (e.repository.id !== repository.id) return;
+		if (this._etagFileSystem === repository.etagFileSystem) return;
 
+		// if the repo is already marked invalid, we already need to recompute the whole overview
 		if (this._invalidateOverview !== 'repo') {
-			this._invalidateOverview = scope;
+			this._invalidateOverview = 'wip';
 		}
+
 		if (!this.host.visible) return;
 
-		if (scope === 'wip') {
-			void this.host.notify(DidChangeRepositoryWip, undefined);
-		} else {
-			this.notifyDidChangeRepositories();
+		void this.host.notify(DidChangeRepositoryWip, undefined);
+	}
+
+	@debug()
+	private onOverviewRepoChanged(repo?: Repository) {
+		if (repo != null) {
+			if (this._etagRepository === repo.etag) {
+				return;
+			}
+		} else if (this._etag === this.container.git.etag) {
+			return;
 		}
+
+		this._invalidateOverview = 'repo';
+
+		if (!this.host.visible) return;
+
+		this.notifyDidChangeRepositories();
 	}
 
 	private getSelectedRepository() {
@@ -831,13 +955,13 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			this.selectRepository();
 		}
 
-		return this._repositorySubscription?.repo;
+		return this._repositorySubscription?.source;
 	}
 
 	private _invalidateOverview: 'repo' | 'wip' | undefined;
 	private readonly _repositoryBranches: Map<string, RepositoryBranchData> = new Map();
 	private async getBranchesData(repo: Repository, force = false) {
-		if (force || !this._repositoryBranches.has(repo.path)) {
+		if (force || !this._repositoryBranches.has(repo.path) || repo.etag !== this._etagRepository) {
 			const worktrees = (await repo.git.worktrees()?.getWorktrees()) ?? [];
 			const worktreesByBranch = groupWorktreesByBranch(worktrees, { includeDefault: true });
 			const [branchesResult] = await Promise.allSettled([
@@ -848,6 +972,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			]);
 
 			const branches = getSettledValue(branchesResult)?.values ?? [];
+			this._etagRepository = repo.etag;
 
 			this._repositoryBranches.set(repo.path, {
 				repo: repo,
@@ -864,20 +989,28 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 	private async getIntegrationStates(force = false) {
 		if (force || this._integrationStates == null) {
-			const promises = filterMap(this.container.integrations.getLoaded(), async i =>
-				isSupportedCloudIntegrationId(i.id)
+			const promises = filterMap(await this.container.integrations.getConfigured(), i =>
+				isSupportedCloudIntegrationId(i.integrationId)
 					? ({
-							id: i.id,
-							name: i.name,
-							icon: `gl-provider-${i.icon}`,
-							connected: i.maybeConnected ?? (await i.isConnected()),
-							supports: i.type === 'hosting' ? ['prs', 'issues'] : i.type === 'issues' ? ['issues'] : [],
+							id: i.integrationId,
+							name: providersMetadata[i.integrationId].name,
+							icon: `gl-provider-${providersMetadata[i.integrationId].iconKey}`,
+							connected: true,
+							supports:
+								providersMetadata[i.integrationId].type === 'hosting'
+									? ['prs', 'issues']
+									: providersMetadata[i.integrationId].type === 'issues'
+									  ? ['issues']
+									  : [],
+							requiresPro:
+								supportedCloudIntegrationDescriptors.find(item => item.id === i.integrationId)
+									?.requiresPro ?? false,
 					  } satisfies IntegrationState)
 					: undefined,
 			);
 
 			const integrationsResults = await Promise.allSettled(promises);
-			const integrations = [...filterMap(integrationsResults, r => getSettledValue(r))];
+			const integrations: IntegrationState[] = [...filterMap(integrationsResults, r => getSettledValue(r))];
 
 			this._defaultSupportedCloudIntegrations ??= supportedCloudIntegrationDescriptors.map(d => ({
 				...d,
@@ -928,6 +1061,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 	private async getSubscriptionState(subscription?: Subscription) {
 		subscription = await this.getSubscription(subscription);
+		this._etagSubscription = this.container.subscription.etag;
 
 		let avatar;
 		if (subscription.account?.email) {
@@ -991,8 +1125,15 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 	private async notifyDidChangeIntegrations() {
 		// force rechecking
-		const integrations = await this.getIntegrationStates(true);
+		const [integrationResult, aiModelResult] = await Promise.allSettled([
+			this.getIntegrationStates(true),
+			this.container.ai.getModel({ silent: true }),
+		]);
+
+		const integrations = getSettledValue(integrationResult) ?? [];
 		const anyConnected = integrations.some(i => i.connected);
+		const ai = { model: getSettledValue(aiModelResult) };
+
 		if (anyConnected) {
 			this.onCollapseSection({
 				section: 'integrationBanner',
@@ -1002,6 +1143,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		void this.host.notify(DidChangeIntegrationsConnections, {
 			hasAnyIntegrationConnected: anyConnected,
 			integrations: integrations,
+			ai: ai,
 		});
 	}
 
@@ -1021,8 +1163,8 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		});
 	}
 
-	private mergeTargetCompare(ref: BranchRef & { mergeTargetId: string }) {
-		return this.container.views.searchAndCompare.compare(ref.repoPath, ref.branchId, ref.mergeTargetId);
+	private mergeTargetCompare(ref: BranchAndTargetRefs) {
+		return this.container.views.searchAndCompare.compare(ref.repoPath, ref.branchName, ref.mergeTargetName);
 	}
 
 	private async pullRequestCompare(ref: BranchRef) {
@@ -1158,29 +1300,53 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 
 		return branch.getAssociatedPullRequest();
 	}
+
+	private getBranchOverviewType(
+		branch: GitBranch,
+		worktreesByBranch: Map<string, GitWorktree>,
+	): 'active' | 'recent' | 'stale' | undefined {
+		if (branch.current || worktreesByBranch.get(branch.id)?.opened) {
+			return 'active';
+		}
+
+		const timestamp = branch.date?.getTime();
+		if (timestamp != null) {
+			const now = Date.now();
+
+			const recentThreshold = now - thresholdValues[this._overviewBranchFilter.recent.threshold];
+			if (timestamp > recentThreshold) {
+				return 'recent';
+			}
+
+			const staleThreshold = now - thresholdValues[this._overviewBranchFilter.stale.threshold];
+			if (timestamp < staleThreshold) {
+				return 'stale';
+			}
+		}
+
+		if (branch.upstream?.missing) {
+			return 'stale';
+		}
+
+		return undefined;
+	}
 }
 
-const thresholdValues: Record<OverviewStaleThreshold | OverviewRecentThreshold, number> = {
-	OneDay: 1000 * 60 * 60 * 24 * 1,
-	OneWeek: 1000 * 60 * 60 * 24 * 7,
-	OneMonth: 1000 * 60 * 60 * 24 * 30,
-	OneYear: 1000 * 60 * 60 * 24 * 365,
-};
-
-function getOverviewBranches(
-	branchesData: RepositoryBranchData,
+function getOverviewBranchesCore(
+	branches: GitBranch[],
+	worktreesByBranch: Map<string, GitWorktree>,
+	isPro: boolean,
 	container: Container,
-	filters: OverviewFilters,
-	options?: { forceActive?: boolean; isPro?: boolean },
-): GetOverviewBranches | undefined {
-	const { branches, worktreesByBranch } = branchesData;
-	if (branches.length === 0) return undefined;
+	options?: {
+		forceStatus?: boolean;
+		isActive?: boolean;
+		includeMergeTarget?: boolean;
+	},
+): GetOverviewBranch[] {
+	if (branches.length === 0) return [];
 
-	const overviewBranches: GetOverviewBranches = {
-		active: [],
-		recent: [],
-		stale: [],
-	};
+	const isActive = options?.isActive ?? false;
+	const forceOptions = options?.forceStatus ? { force: true } : undefined;
 
 	let launchpadPromise: Promise<LaunchpadCategorizedResult> | undefined;
 	let repoStatusPromise: Promise<GitStatus | undefined> | undefined;
@@ -1191,173 +1357,72 @@ function getOverviewBranches(
 	const contributorsPromises = new Map<string, Promise<BranchContributionsOverview | undefined>>();
 	const mergeTargetPromises = new Map<string, Promise<BranchMergeTargetStatusInfo>>();
 
-	const now = Date.now();
-	const recentThreshold = now - thresholdValues[filters.recent.threshold];
-
+	const overviewBranches: GetOverviewBranch[] = [];
 	for (const branch of branches) {
 		const wt = worktreesByBranch.get(branch.id);
-		const worktree: GetOverviewBranch['worktree'] = wt ? { name: wt.name, uri: wt.uri.toString() } : undefined;
 
 		const timestamp = branch.date?.getTime();
-		if (branch.current || wt?.opened) {
-			const forceOptions = options?.forceActive ? { force: true } : undefined;
-			if (options?.isPro !== false) {
-				prPromises.set(branch.id, getPullRequestInfo(container, branch, launchpadPromise));
-				autolinkPromises.set(branch.id, branch.getEnrichedAutolinks());
-				issuePromises.set(
-					branch.id,
-					getAssociatedIssuesForBranch(container, branch).then(issues => issues.value),
-				);
-				contributorsPromises.set(
-					branch.id,
-					container.git.branches(branch.repoPath).getBranchContributionsOverview(branch.ref),
-				);
-				if (branch.current) {
-					mergeTargetPromises.set(branch.id, getBranchMergeTargetStatusInfo(container, branch));
-				}
+
+		if (isPro === true) {
+			prPromises.set(branch.id, getPullRequestInfo(container, branch, launchpadPromise));
+			autolinkPromises.set(branch.id, branch.getEnrichedAutolinks());
+			issuePromises.set(
+				branch.id,
+				getAssociatedIssuesForBranch(container, branch).then(issues => issues.value),
+			);
+			contributorsPromises.set(
+				branch.id,
+				container.git.branches(branch.repoPath).getBranchContributionsOverview(branch.ref),
+			);
+			if (branch.current) {
+				mergeTargetPromises.set(branch.id, getBranchMergeTargetStatusInfo(container, branch));
 			}
-
-			if (wt != null) {
-				statusPromises.set(branch.id, wt.getStatus(forceOptions));
-			} else {
-				if (repoStatusPromise === undefined) {
-					repoStatusPromise = container.git.status(branch.repoPath).getStatus();
-				}
-				statusPromises.set(branch.id, repoStatusPromise);
-			}
-
-			overviewBranches.active.push({
-				reference: getReferenceFromBranch(branch),
-				repoPath: branch.repoPath,
-				id: branch.id,
-				name: branch.name,
-				opened: true,
-				timestamp: timestamp,
-				state: branch.state,
-				status: branch.status,
-				upstream: branch.upstream,
-				worktree: worktree,
-			});
-
-			continue;
 		}
 
-		if (timestamp != null && timestamp > recentThreshold) {
-			if (options?.isPro !== false) {
-				prPromises.set(branch.id, getPullRequestInfo(container, branch, launchpadPromise));
-				autolinkPromises.set(branch.id, branch.getEnrichedAutolinks());
-				issuePromises.set(
-					branch.id,
-					getAssociatedIssuesForBranch(container, branch).then(issues => issues.value),
-				);
-				contributorsPromises.set(
-					branch.id,
-					container.git.branches(branch.repoPath).getBranchContributionsOverview(branch.ref),
-				);
+		if (wt != null) {
+			statusPromises.set(branch.id, wt.getStatus(forceOptions));
+		} else if (isActive === true) {
+			if (repoStatusPromise === undefined) {
+				repoStatusPromise = container.git.status(branch.repoPath).getStatus();
 			}
-
-			if (wt != null) {
-				statusPromises.set(branch.id, wt.getStatus());
-			}
-
-			overviewBranches.recent.push({
-				reference: getReferenceFromBranch(branch),
-				repoPath: branch.repoPath,
-				id: branch.id,
-				name: branch.name,
-				opened: false,
-				timestamp: timestamp,
-				state: branch.state,
-				status: branch.status,
-				upstream: branch.upstream,
-				worktree: worktree,
-			});
-
-			continue;
+			statusPromises.set(branch.id, repoStatusPromise);
 		}
-	}
 
-	if (filters?.stale?.show === true) {
-		const staleThreshold = now - thresholdValues[filters.stale.threshold];
-		sortBranches(branches, {
-			missingUpstream: true,
-			orderBy: 'date:asc',
+		overviewBranches.push({
+			reference: getReferenceFromBranch(branch),
+			repoPath: branch.repoPath,
+			id: branch.id,
+			name: branch.name,
+			opened: isActive,
+			timestamp: timestamp,
+			state: branch.state,
+			status: branch.status,
+			upstream: branch.upstream,
+			worktree: wt ? { name: wt.name, uri: wt.uri.toString() } : undefined,
 		});
-		for (const branch of branches) {
-			if (overviewBranches.stale.length > 9) break;
-
-			if (
-				overviewBranches.active.some(b => b.id === branch.id) ||
-				overviewBranches.recent.some(b => b.id === branch.id)
-			) {
-				continue;
-			}
-
-			if (options?.isPro !== false) {
-				autolinkPromises.set(branch.id, branch.getEnrichedAutolinks());
-				issuePromises.set(
-					branch.id,
-					getAssociatedIssuesForBranch(container, branch).then(issues => issues.value),
-				);
-			}
-
-			const timestamp = branch.date?.getTime();
-			if (branch.upstream?.missing || (timestamp != null && timestamp < staleThreshold)) {
-				const wt = worktreesByBranch.get(branch.id);
-				const worktree: GetOverviewBranch['worktree'] = wt
-					? { name: wt.name, uri: wt.uri.toString() }
-					: undefined;
-
-				if (options?.isPro !== false) {
-					if (!branch.upstream?.missing) {
-						prPromises.set(branch.id, getPullRequestInfo(container, branch, launchpadPromise));
-					}
-
-					contributorsPromises.set(
-						branch.id,
-						container.git.branches(branch.repoPath).getBranchContributionsOverview(branch.ref),
-					);
-				}
-
-				if (wt != null) {
-					statusPromises.set(branch.id, wt.getStatus());
-				}
-
-				overviewBranches.stale.push({
-					reference: getReferenceFromBranch(branch),
-					repoPath: branch.repoPath,
-					id: branch.id,
-					name: branch.name,
-					opened: false,
-					timestamp: timestamp,
-					state: branch.state,
-					status: branch.status,
-					upstream: branch.upstream,
-					worktree: worktree,
-				});
-
-				continue;
-			}
-		}
 	}
 
-	enrichOverviewBranches(
-		overviewBranches,
-		prPromises,
-		autolinkPromises,
-		issuePromises,
-		statusPromises,
-		contributorsPromises,
-		mergeTargetPromises,
-		container,
-	);
+	if (overviewBranches.length > 0) {
+		enrichOverviewBranchesCore(
+			overviewBranches,
+			isActive,
+			prPromises,
+			autolinkPromises,
+			issuePromises,
+			statusPromises,
+			contributorsPromises,
+			mergeTargetPromises,
+			container,
+		);
+	}
 
 	return overviewBranches;
 }
 
 // FIXME: support partial enrichment
-function enrichOverviewBranches(
-	overviewBranches: GetOverviewBranches,
+function enrichOverviewBranchesCore(
+	overviewBranches: GetOverviewBranch[],
+	isActive: boolean,
 	prPromises: Map<string, Promise<PullRequestInfo | undefined>>,
 	autolinkPromises: Map<string, Promise<Map<string, EnrichedAutolink> | undefined>>,
 	issuePromises: Map<string, Promise<Issue[] | undefined>>,
@@ -1366,8 +1431,7 @@ function enrichOverviewBranches(
 	mergeTargetPromises: Map<string, Promise<BranchMergeTargetStatusInfo>>,
 	container: Container,
 ) {
-	for (const branch of [...overviewBranches.active, ...overviewBranches.recent, ...overviewBranches.stale]) {
-		const isActive = overviewBranches.active.includes(branch);
+	for (const branch of overviewBranches) {
 		branch.pr = prPromises.get(branch.id);
 
 		const autolinks = autolinkPromises.get(branch.id);
@@ -1504,7 +1568,7 @@ async function getLaunchpadItemInfo(
 	let lpi = result.items.find(i => i.url === pr.url);
 	if (lpi == null) {
 		// result = await container.launchpad.getCategorizedItems({ search: pr.url });
-		result = await container.launchpad.getCategorizedItems({ search: [{ pullRequest: pr, reasons: [] }] });
+		result = await container.launchpad.getCategorizedItems({ search: [pr] });
 		if (result.error != null) return undefined;
 
 		lpi = result.items.find(i => i.url === pr.url);

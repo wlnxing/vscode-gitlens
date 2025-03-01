@@ -11,7 +11,7 @@ import type { CommandContext } from './commandContext';
 export class ShowViewCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
 		super([
-			GlCommand.ShowAccountView,
+			'gitlens.showAccountView',
 			GlCommand.ShowBranchesView,
 			GlCommand.ShowCommitDetailsView,
 			GlCommand.ShowCommitsView,
@@ -33,11 +33,11 @@ export class ShowViewCommand extends GlCommandBase {
 		]);
 	}
 
-	protected override preExecute(context: CommandContext, ...args: unknown[]) {
+	protected override preExecute(context: CommandContext, ...args: unknown[]): Promise<void> {
 		return this.execute(context, ...args);
 	}
 
-	async notifyWhenNoRepository(featureName?: string) {
+	async notifyWhenNoRepository(featureName?: string): Promise<void> {
 		if (this.container.git.openRepositoryCount > 0) {
 			return;
 		}
@@ -53,10 +53,10 @@ export class ShowViewCommand extends GlCommandBase {
 		}
 	}
 
-	async execute(context: CommandContext, ...args: unknown[]) {
+	async execute(context: CommandContext, ...args: unknown[]): Promise<void> {
 		const command = context.command;
 		switch (command) {
-			case GlCommand.ShowAccountView:
+			case 'gitlens.showAccountView':
 				return this.container.views.home.show(
 					undefined,
 					...([{ focusAccount: true }, ...args] as HomeWebviewShowingArgs),

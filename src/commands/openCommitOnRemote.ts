@@ -36,10 +36,14 @@ export class OpenCommitOnRemoteCommand extends ActiveEditorCommand {
 	}
 
 	constructor(private readonly container: Container) {
-		super([GlCommand.OpenCommitOnRemote, GlCommand.Deprecated_OpenCommitInRemote, GlCommand.CopyRemoteCommitUrl]);
+		super([
+			GlCommand.OpenCommitOnRemote,
+			/** @deprecated */ 'gitlens.openCommitInRemote',
+			GlCommand.CopyRemoteCommitUrl,
+		]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: OpenCommitOnRemoteCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: OpenCommitOnRemoteCommandArgs): Promise<void> {
 		let uri = context.uri;
 
 		if (context.type === 'editorLine') {
@@ -65,7 +69,7 @@ export class OpenCommitOnRemoteCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: OpenCommitOnRemoteCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: OpenCommitOnRemoteCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 
 		let gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;

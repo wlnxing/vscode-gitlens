@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import type { Container } from '../../container';
 import { memoize } from '../../system/decorators/-webview/memoize';
 import { pluralize } from '../../system/string';
 import { formatDetachedHeadName, getRemoteNameFromBranchName, isDetachedHead } from '../utils/branch.utils';
 import { getUpstreamStatus } from '../utils/status.utils';
 import type { GitBranchStatus, GitTrackingState } from './branch';
+import type { GitDiffFileStats } from './diff';
 import { GitFileConflictStatus, GitFileIndexStatus, GitFileWorkingTreeStatus } from './fileStatus';
 import type { GitRemote } from './remote';
 import type { GitStatusFile } from './statusFile';
@@ -37,41 +39,41 @@ export class GitStatus {
 		return 'upToDate';
 	}
 
-	get hasChanges() {
+	get hasChanges(): boolean {
 		return this.files.length !== 0;
 	}
 
 	@memoize()
-	get hasConflicts() {
+	get hasConflicts(): boolean {
 		return this.files.some(f => f.conflicted);
 	}
 
 	@memoize()
-	get conflicts() {
+	get conflicts(): GitStatusFile[] {
 		return this.files.filter(f => f.conflicted);
 	}
 
 	@memoize()
-	get hasUntrackedChanges() {
+	get hasUntrackedChanges(): boolean {
 		return this.files.some(f => f.workingTreeStatus === GitFileWorkingTreeStatus.Untracked);
 	}
 
 	@memoize()
-	get untrackedChanges() {
+	get untrackedChanges(): GitStatusFile[] {
 		return this.files.filter(f => f.workingTreeStatus === GitFileWorkingTreeStatus.Untracked);
 	}
 
 	@memoize()
-	get hasWorkingTreeChanges() {
+	get hasWorkingTreeChanges(): boolean {
 		return this.files.some(f => f.workingTreeStatus != null);
 	}
 
 	@memoize()
-	get workingTreeChanges() {
+	get workingTreeChanges(): GitStatusFile[] {
 		return this.files.filter(f => f.workingTreeStatus != null);
 	}
 
-	get ref() {
+	get ref(): string {
 		return this.detached ? this.sha : this.branch;
 	}
 
@@ -174,7 +176,7 @@ export class GitStatus {
 	}
 
 	@memoize()
-	getDiffStatus() {
+	getDiffStatus(): GitDiffFileStats {
 		const diff = {
 			added: 0,
 			deleted: 0,

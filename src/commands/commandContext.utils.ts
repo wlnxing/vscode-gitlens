@@ -1,5 +1,6 @@
 import type { GitTimelineItem, SourceControl, TextEditor } from 'vscode';
 import { Uri, window } from 'vscode';
+import type { GlCommands } from '../constants.commands';
 import type { StoredNamedRef } from '../constants.storage';
 import type { GitBranch } from '../git/models/branch';
 import { isBranch } from '../git/models/branch';
@@ -157,10 +158,10 @@ export interface CommandContextParsingOptions {
 }
 
 export function parseCommandContext(
-	command: string,
+	command: GlCommands,
 	options?: CommandContextParsingOptions,
 	...args: any[]
-): [CommandContext | CommandContext[], any[]] {
+): [CommandContext, any[]] {
 	let editor: TextEditor | undefined = undefined;
 
 	const originalArgs = [...args];
@@ -218,25 +219,15 @@ export function parseCommandContext(
 	}
 
 	if (firstArg instanceof ViewNode) {
-		let [node, ...rest] = args as [ViewNode, unknown];
+		const [active, selection, ...rest] = args as [ViewNode, unknown];
 
-		// If there is a node followed by an array of nodes, then we want to execute the command for each
-		firstArg = rest[0];
-		if (Array.isArray(firstArg) && firstArg[0] instanceof ViewNode) {
-			let nodes;
-			[nodes, ...rest] = rest as unknown as [ViewNode[], unknown];
-
-			const contexts: CommandContext[] = [];
-			for (const n of nodes) {
-				if (n?.constructor === node.constructor) {
-					contexts.push({ command: command, type: 'viewItem', args: originalArgs, node: n, uri: n.uri });
-				}
-			}
-
-			return [contexts, rest];
+		// If there is a node followed by an array of nodes, then check how we want to execute the command
+		if (active instanceof ViewNode && Array.isArray(selection) && selection[0] instanceof ViewNode) {
+			const nodes = selection.filter((n): n is ViewNode => n?.constructor === active.constructor);
+			return [{ command: command, type: 'viewItems', args: originalArgs, node: active, nodes: nodes }, rest];
 		}
 
-		return [{ command: command, type: 'viewItem', args: originalArgs, node: node, uri: node.uri }, rest];
+		return [{ command: command, type: 'viewItem', args: originalArgs, node: active, uri: active.uri }, rest];
 	}
 
 	if (isScmResourceState(firstArg)) {

@@ -23,7 +23,7 @@ import { getPlatform } from '@env/platform';
 import type { OpenWalkthroughCommandArgs } from '../../commands/walkthroughs';
 import { urls } from '../../constants';
 import type { CoreColors } from '../../constants.colors';
-import { GlCommand } from '../../constants.commands';
+import type { GlCommands } from '../../constants.commands';
 import type { StoredFeaturePreviewUsagePeriod } from '../../constants.storage';
 import {
 	proFeaturePreviewUsageDurationInDays,
@@ -50,28 +50,31 @@ import type { RepositoriesChangeEvent } from '../../git/gitProviderService';
 import { executeCommand, registerCommand } from '../../system/-webview/command';
 import { configuration } from '../../system/-webview/configuration';
 import { setContext } from '../../system/-webview/context';
-import { openUrl } from '../../system/-webview/utils';
+import { openUrl } from '../../system/-webview/vscode';
+import { createCommandLink } from '../../system/commands';
 import { createFromDateDelta, fromNow } from '../../system/date';
 import { gate } from '../../system/decorators/-webview/gate';
 import { debug, log } from '../../system/decorators/log';
 import { take } from '../../system/event';
-import type { Deferrable } from '../../system/function';
-import { debounce, once } from '../../system/function';
+import { once } from '../../system/function';
+import type { Deferrable } from '../../system/function/debounce';
+import { debounce } from '../../system/function/debounce';
 import { Logger } from '../../system/logger';
 import { getLogScope, setLogScopeExit } from '../../system/logger.scope';
 import { flatten } from '../../system/object';
 import { pauseOnCancelOrTimeout } from '../../system/promise';
 import { pluralize } from '../../system/string';
+import { createDisposable } from '../../system/unifiedDisposable';
 import { satisfies } from '../../system/version';
 import { LoginUriPathPrefix } from './authenticationConnection';
 import { authenticationProviderScopes } from './authenticationProvider';
 import type { GKCheckInResponse } from './models/checkin';
 import type { Organization } from './models/organization';
+import type { Promo } from './models/promo';
 import type { Subscription } from './models/subscription';
 import type { ServerConnection } from './serverConnection';
 import { ensurePlusFeaturesEnabled } from './utils/-webview/plus.utils';
 import { getSubscriptionFromCheckIn } from './utils/checkin.utils';
-import { getApplicablePromo } from './utils/promo.utils';
 import {
 	assertSubscriptionState,
 	computeSubscriptionState,
@@ -338,24 +341,24 @@ export class SubscriptionService implements Disposable {
 
 	private registerCommands(): Disposable[] {
 		return [
-			registerCommand(GlCommand.PlusLogin, (src?: Source) => this.loginOrSignUp(false, src)),
-			registerCommand(GlCommand.PlusSignUp, (src?: Source) => this.loginOrSignUp(true, src)),
-			registerCommand(GlCommand.PlusLogout, (src?: Source) => this.logout(src)),
-			registerCommand(GlCommand.GKSwitchOrganization, (src?: Source) => this.switchOrganization(src)),
+			registerCommand('gitlens.plus.login', (src?: Source) => this.loginOrSignUp(false, src)),
+			registerCommand('gitlens.plus.signUp', (src?: Source) => this.loginOrSignUp(true, src)),
+			registerCommand('gitlens.plus.logout', (src?: Source) => this.logout(src)),
+			registerCommand('gitlens.gk.switchOrganization', (src?: Source) => this.switchOrganization(src)),
 
-			registerCommand(GlCommand.PlusManage, (src?: Source) => this.manage(src)),
-			registerCommand(GlCommand.PlusShowPlans, (src?: Source) => this.showPlans(src)),
-			registerCommand(GlCommand.PlusStartPreviewTrial, (src?: Source) => this.startPreviewTrial(src)),
-			registerCommand(GlCommand.PlusReactivateProTrial, (src?: Source) => this.reactivateProTrial(src)),
-			registerCommand(GlCommand.PlusResendVerification, (src?: Source) => this.resendVerification(src)),
-			registerCommand(GlCommand.PlusUpgrade, (src?: Source) => this.upgrade(src)),
+			registerCommand('gitlens.plus.manage', (src?: Source) => this.manage(src)),
+			registerCommand('gitlens.plus.showPlans', (src?: Source) => this.showPlans(src)),
+			registerCommand('gitlens.plus.startPreviewTrial', (src?: Source) => this.startPreviewTrial(src)),
+			registerCommand('gitlens.plus.reactivateProTrial', (src?: Source) => this.reactivateProTrial(src)),
+			registerCommand('gitlens.plus.resendVerification', (src?: Source) => this.resendVerification(src)),
+			registerCommand('gitlens.plus.upgrade', (src?: Source) => this.upgrade(src)),
 
-			registerCommand(GlCommand.PlusHide, (src?: Source) => this.setProFeaturesVisibility(false, src)),
-			registerCommand(GlCommand.PlusRestore, (src?: Source) => this.setProFeaturesVisibility(true, src)),
+			registerCommand('gitlens.plus.hide', (src?: Source) => this.setProFeaturesVisibility(false, src)),
+			registerCommand('gitlens.plus.restore', (src?: Source) => this.setProFeaturesVisibility(true, src)),
 
-			registerCommand(GlCommand.PlusValidate, (src?: Source) => this.validate({ force: true }, src)),
+			registerCommand('gitlens.plus.validate', (src?: Source) => this.validate({ force: true }, src)),
 
-			registerCommand(GlCommand.PlusContinueFeaturePreview, ({ feature }: { feature: FeaturePreviews }) =>
+			registerCommand('gitlens.plus.continueFeaturePreview', ({ feature }: { feature: FeaturePreviews }) =>
 				this.continueFeaturePreview(feature),
 			),
 		];
@@ -375,7 +378,7 @@ export class SubscriptionService implements Disposable {
 
 	@gate()
 	@log()
-	async continueFeaturePreview(feature: FeaturePreviews) {
+	async continueFeaturePreview(feature: FeaturePreviews): Promise<void> {
 		const preview = this.getStoredFeaturePreview(feature);
 		const status = getFeaturePreviewStatus(preview);
 
@@ -435,30 +438,30 @@ export class SubscriptionService implements Disposable {
 		switch (subscription.state) {
 			case SubscriptionState.VerificationRequired:
 			case SubscriptionState.Community:
-				void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
-					...source,
+				void executeCommand<OpenWalkthroughCommandArgs>('gitlens.openWalkthrough', {
 					step: 'get-started-community',
+					source: source,
 				});
 				break;
 			case SubscriptionState.ProTrial:
 			case SubscriptionState.ProPreview:
-				void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
-					...source,
+				void executeCommand<OpenWalkthroughCommandArgs>('gitlens.openWalkthrough', {
 					step: 'welcome-in-trial',
+					source: source,
 				});
 				break;
 			case SubscriptionState.ProTrialReactivationEligible:
 			case SubscriptionState.ProTrialExpired:
 			case SubscriptionState.ProPreviewExpired:
-				void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
-					...source,
+				void executeCommand<OpenWalkthroughCommandArgs>('gitlens.openWalkthrough', {
 					step: 'welcome-in-trial-expired',
+					source: source,
 				});
 				break;
 			case SubscriptionState.Paid:
-				void executeCommand<OpenWalkthroughCommandArgs>(GlCommand.OpenWalkthrough, {
-					...source,
+				void executeCommand<OpenWalkthroughCommandArgs>('gitlens.openWalkthrough', {
 					step: 'welcome-paid',
+					source: source,
 				});
 				break;
 		}
@@ -633,10 +636,10 @@ export class SubscriptionService implements Disposable {
 
 		try {
 			const exchangeToken = await this.container.accountAuthentication.getExchangeToken();
-			await openUrl(this.container.getGkDevUri('account', `token=${exchangeToken}`).toString(true));
+			await openUrl(this.container.urls.getGkDevUrl('account', `token=${exchangeToken}`));
 		} catch (ex) {
 			Logger.error(ex, scope);
-			await openUrl(this.container.getGkDevUri('account').toString(true));
+			await openUrl(this.container.urls.getGkDevUrl('account'));
 		}
 	}
 
@@ -796,7 +799,7 @@ export class SubscriptionService implements Disposable {
 		if (silent && !configuration.get('plusFeatures.enabled', undefined, true)) return;
 
 		if (!this.container.views.home.visible) {
-			await executeCommand(GlCommand.ShowAccountView);
+			await executeCommand('gitlens.showAccountView');
 		}
 	}
 
@@ -854,7 +857,10 @@ export class SubscriptionService implements Disposable {
 			const result = await window.showInformationMessage(
 				`You can now preview local Pro features for ${
 					days < 1 ? '1 day' : pluralize('day', days)
-				}, or for full access to all GitLens Pro features, [start your free ${proTrialLengthInDays}-day Pro trial](command:gitlens.plus.signUp "Try GitLens Pro") — no credit card required.`,
+				}, or for full access to all GitLens Pro features, [start your free ${proTrialLengthInDays}-day Pro trial](${createCommandLink<Source>(
+					'gitlens.plus.signUp',
+					source,
+				)} "Try GitLens Pro") — no credit card required.`,
 				confirm,
 				learn,
 			);
@@ -871,11 +877,29 @@ export class SubscriptionService implements Disposable {
 
 		if (!(await ensurePlusFeaturesEnabled())) return;
 
-		if (this.container.telemetry.enabled) {
-			this.container.telemetry.sendEvent('subscription/action', { action: 'upgrade' }, source);
-		}
+		let aborted = false;
+		const promo = await this.container.productConfig.getApplicablePromo(this._subscription.state);
 
-		if (this._subscription.account != null) {
+		using telemetry = this.container.telemetry.enabled
+			? createDisposable(
+					() => {
+						this.container.telemetry.sendEvent(
+							'subscription/action',
+							{
+								action: 'upgrade',
+								aborted: aborted,
+								'promo.key': promo?.key,
+								'promo.code': promo?.code,
+							},
+							source,
+						);
+					},
+					{ once: true },
+			  )
+			: undefined;
+
+		const hasAccount = this._subscription.account != null;
+		if (hasAccount) {
 			// Do a pre-check-in to see if we've already upgraded to a paid plan.
 			try {
 				const session = await this.ensureSession(false, source);
@@ -891,11 +915,8 @@ export class SubscriptionService implements Disposable {
 		query.set('source', 'gitlens');
 		query.set('product', 'gitlens');
 
-		const hasAccount = this._subscription.account != null;
-
-		const promoCode = getApplicablePromo(this._subscription.state)?.code;
-		if (promoCode != null) {
-			query.set('promoCode', promoCode);
+		if (promo?.code != null) {
+			query.set('promoCode', promo.code);
 		}
 
 		const activeOrgId = this._subscription.activeOrganization?.id;
@@ -910,26 +931,33 @@ export class SubscriptionService implements Disposable {
 
 		try {
 			if (hasAccount) {
-				const token = await this.container.accountAuthentication.getExchangeToken(
-					SubscriptionUpdatedUriPathPrefix,
-				);
-				query.set('token', token);
-			} else {
+				try {
+					const token = await this.container.accountAuthentication.getExchangeToken(
+						SubscriptionUpdatedUriPathPrefix,
+					);
+					query.set('token', token);
+				} catch (ex) {
+					Logger.error(ex, scope);
+				}
+			}
+
+			if (!query.has('token')) {
 				const successUri = await env.asExternalUri(
 					Uri.parse(`${env.uriScheme}://${this.container.context.extension.id}/${LoginUriPathPrefix}`),
 				);
 				query.set('success_uri', successUri.toString(true));
 			}
-
-			if (!(await openUrl(this.container.getGkDevUri('purchase/checkout', query.toString()).toString(true)))) {
-				return;
-			}
 		} catch (ex) {
 			Logger.error(ex, scope);
-			if (!(await openUrl(this.container.getGkDevUri('purchase/checkout', query.toString()).toString(true)))) {
-				return;
-			}
 		}
+
+		aborted = !(await openUrl(this.container.urls.getGkDevUrl('purchase/checkout', query)));
+
+		if (aborted) {
+			return;
+		}
+
+		telemetry?.dispose();
 
 		const completionPromises = [new Promise<boolean>(resolve => setTimeout(() => resolve(false), 5 * 60 * 1000))];
 
@@ -1375,8 +1403,9 @@ export class SubscriptionService implements Disposable {
 		subscription.state = computeSubscriptionState(subscription);
 		assertSubscriptionState(subscription);
 
-		const promo = getApplicablePromo(subscription.state);
-		void setContext('gitlens:promo', promo?.key);
+		void setContext('gitlens:promo', undefined);
+		const promoPromise = this.container.productConfig.getApplicablePromo(subscription.state).catch(() => undefined);
+		void promoPromise.then(promo => void setContext('gitlens:promo', promo?.key));
 
 		const previous = this._subscription as typeof this._subscription | undefined; // Can be undefined here, since we call this in the constructor
 		// Check the previous and new subscriptions are exactly the same
@@ -1390,8 +1419,8 @@ export class SubscriptionService implements Disposable {
 			return;
 		}
 
-		queueMicrotask(() => {
-			let data = flattenSubscription(subscription, undefined, this.getFeaturePreviews());
+		queueMicrotask(async () => {
+			let data = flattenSubscription(subscription, undefined, this.getFeaturePreviews(), await promoPromise);
 			this.container.telemetry.setGlobalAttributes(data);
 
 			data = {
@@ -1563,7 +1592,7 @@ export class SubscriptionService implements Disposable {
 
 		this._statusBarSubscription.name = 'GitLens Pro';
 		this._statusBarSubscription.text = '$(gitlens-gitlens)';
-		this._statusBarSubscription.command = GlCommand.ShowAccountView;
+		this._statusBarSubscription.command = 'gitlens.showAccountView' satisfies GlCommands;
 		this._statusBarSubscription.backgroundColor = undefined;
 
 		if (account?.verified === false) {
@@ -1653,7 +1682,7 @@ export class SubscriptionService implements Disposable {
 		);
 	}
 
-	onLoginUri(uri: Uri) {
+	private onLoginUri(uri: Uri): void {
 		const scope = getLogScope();
 		const queryParams = new URLSearchParams(uri.query);
 		const code = queryParams.get('code');
@@ -1717,6 +1746,7 @@ function flattenSubscription(
 	subscription: Optional<Subscription, 'state'> | undefined,
 	prefix?: string,
 	featurePreviews?: FeaturePreview[] | undefined,
+	promo?: Promo | undefined,
 ): SubscriptionEventDataWithPrevious {
 	if (subscription == null) return {};
 
@@ -1739,6 +1769,8 @@ function flattenSubscription(
 		...flatten(subscription.previewTrial, `${prefix ? `${prefix}.` : ''}subscription.previewTrial`, {
 			skipPaths: ['actual.name', 'effective.name'],
 		}),
+		'subscription.promo.key': promo?.key,
+		'subscription.promo.code': promo?.code,
 		'subscription.state': state,
 		'subscription.stateString': getSubscriptionStateString(state),
 		...flattenedFeaturePreviews,

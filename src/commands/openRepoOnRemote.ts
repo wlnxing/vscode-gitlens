@@ -21,10 +21,14 @@ export interface OpenRepoOnRemoteCommandArgs {
 @command()
 export class OpenRepoOnRemoteCommand extends ActiveEditorCommand {
 	constructor(private readonly container: Container) {
-		super([GlCommand.OpenRepoOnRemote, GlCommand.Deprecated_OpenRepoInRemote, GlCommand.CopyRemoteRepositoryUrl]);
+		super([
+			'gitlens.openRepoOnRemote',
+			/** @deprecated */ 'gitlens.openRepoInRemote',
+			GlCommand.CopyRemoteRepositoryUrl,
+		]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: OpenRepoOnRemoteCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: OpenRepoOnRemoteCommandArgs): Promise<void> {
 		if (isCommandContextViewNodeHasRemote(context)) {
 			args = { ...args, remote: context.node.remote.name };
 		}
@@ -36,7 +40,7 @@ export class OpenRepoOnRemoteCommand extends ActiveEditorCommand {
 		return this.execute(context.editor, context.uri, args);
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: OpenRepoOnRemoteCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: OpenRepoOnRemoteCommandArgs): Promise<void> {
 		uri = getCommandUri(uri, editor);
 
 		const gitUri = uri != null ? await GitUri.fromUri(uri) : undefined;

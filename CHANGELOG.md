@@ -6,9 +6,71 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Added
+
+- Adds AI model status and model switcher to the _Home_ view ([#4064](https://github.com/gitkraken/vscode-gitlens/issues/4064))
+- Adds Anthropic Claude 3.7 Sonnet model for GitLens' AI features ([#4101](https://github.com/gitkraken/vscode-gitlens/issues/4101))
+- Adds Google Gemini 2.0 Flash-Lite model for GitLens' AI features ([#4104](https://github.com/gitkraken/vscode-gitlens/issues/4104))
+- Adds integration with Bitbucket Cloud by showing enriched links to PRs and issues [#4045](https://github.com/gitkraken/vscode-gitlens/issues/4045)
+- Adds ability to control how worktrees are displayed in the views
+  - Adds a `gitlens.views.worktrees.worktrees.viewAs` setting to specify whether to show worktrees by name, path, or relative path
+  - Adds a `gitlens.views.worktrees.branches.layout` setting to specify whether to show branch worktrees as a list or tree, similar to branches
+
+### Changed
+
+- Curated the list of AI models available for GitLens' AI features
+
 ### Fixed
 
+- Fixes avoid eagerly getting "full" commit details for inline blame ([#4115])(https://github.com/gitkraken/vscode-gitlens/issues/4115))
+- Fixes large commit messages work poorly on Commit Graph ([#4100](https://github.com/gitkraken/vscode-gitlens/issues/4100))
+
+## [16.3.2] - 2025-02-21
+
+## [16.3.1] - 2025-02-20
+
+### Fixed
+
+- Fixes Generate Commit Message Error - Anthropic ([#4071](https://github.com/gitkraken/vscode-gitlens/issues/4071))
+- Fixes Settings editor breaking when dragging it to a new tab group ([#4061](https://github.com/gitkraken/vscode-gitlens/issues/4061))
+- Fixes regression where hovering over the Graph WIP row doesn't show up anymore ([#4062](https://github.com/gitkraken/vscode-gitlens/issues/4062))
+- Fixes Inspect & Graph Details: autolinks rendering when enabled setting is false ([#3841](https://github.com/gitkraken/vscode-gitlens/issues/3841))
+- Fixes comparison with Merge Target on Home fails to open a valid comparison ([#4060](https://github.com/gitkraken/vscode-gitlens/issues/4060))
+- Fixes closing the walkthrough on Home from opening the walkthrough ([#4050](https://github.com/gitkraken/vscode-gitlens/issues/4050))
+- Fixes horizontal scrollbar from showing up on the old Home view ([#4051](https://github.com/gitkraken/vscode-gitlens/issues/4051))
+- Fixes a failure when copying changes to a worktree ([#4049](https://github.com/gitkraken/vscode-gitlens/issues/4049))
+
+## [16.3.0] - 2025-02-11
+
+### Added
+
+- Adds rich support for Azure DevOps &mdash; closes [#3902](https://github.com/gitkraken/vscode-gitlens/issues/3902)
+  - Adds integration status and connection flows to the _Home_ view; closes [#3976](https://github.com/gitkraken/vscode-gitlens/issues/3976)
+  - Adds autolinks, issues and pull requests in the _Commit Graph_ and _Home_ view; closes [#3977](https://github.com/gitkraken/vscode-gitlens/issues/3977)
+  - Adds pull request support in _Launchpad_ &mdash; closes [#3978](https://github.com/gitkraken/vscode-gitlens/issues/3978)
+  - Adds issue support to _Start Work_; closes [#3979](https://github.com/gitkraken/vscode-gitlens/issues/3979)
+- Adds new AI-powered ability to generate a stash message from the changes in the _Stash_ commands
+- Adds and expands AI model support for GitLens' AI features
+  - Adds DeepSeek V3 and R1 models &mdash; closes [#3943](https://github.com/gitkraken/vscode-gitlens/issues/3943)
+  - Adds o3-mini and o1 OpenAI models
+  - Adds Gemini 2.0 Flash, Gemini 2.0 Flash-Lite, Gemini 2.0 Pro, and Gemini 2.0 Flash Thinking models
+  - Adds dynamic model loading for GitHub Models and HuggingFace models
+  - Adds a `gitlens.ai.modelOptions.temperature` setting to specify the temperature (randomness) for AI models that support it
+  - Adds a _Switch Model_ button to the AI confirmation prompts
+- Adds Windsurf support &mdash; closes [#3969](https://github.com/gitkraken/vscode-gitlens/issues/3969)
+- Adds "pro" indicators for applicable integrations &mdash; closes [#3972](https://github.com/gitkraken/vscode-gitlens/issues/3972)
+
+### Changed
+
+- Improves performance of updates to active and recent branches on the _Home_ view
+
+### Fixed
+
+- Fixes [#3952](https://github.com/gitkraken/vscode-gitlens/issues/3952) - Interactive rebase doesn't work in GL without VS Code added to path
 - Fixes [#3938](https://github.com/gitkraken/vscode-gitlens/issues/3938) - GitLens automatically initiating an external sign-in after install on vscode.dev
+- Fixes [#3946](https://github.com/gitkraken/vscode-gitlens/issues/3946) - Home View doesn't update repo state changes made when hidden
+- Fixes [#3940](https://github.com/gitkraken/vscode-gitlens/issues/3940) - Commit Details: issue autolinks can disappear after enrichment
+- Fixes [#4035](https://github.com/gitkraken/vscode-gitlens/issues/4035) - Repo is lost when "Generate commit" is requested
 
 ## [16.2.1] - 2025-01-21
 
@@ -5947,7 +6009,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Initial release but still heavily a work in progress.
 
-[unreleased]: https://github.com/gitkraken/vscode-gitlens/compare/v16.2.1...HEAD
+[unreleased]: https://github.com/gitkraken/vscode-gitlens/compare/v16.3.2...HEAD
+[16.3.2]: https://github.com/gitkraken/vscode-gitlens/compare/v16.3.1...gitkraken:v16.3.2
+[16.3.1]: https://github.com/gitkraken/vscode-gitlens/compare/v16.3.0...gitkraken:v16.3.1
+[16.3.0]: https://github.com/gitkraken/vscode-gitlens/compare/v16.2.1...gitkraken:v16.3.0
 [16.2.1]: https://github.com/gitkraken/vscode-gitlens/compare/v16.2.0...gitkraken:v16.2.1
 [16.2.0]: https://github.com/gitkraken/vscode-gitlens/compare/v16.1.1...gitkraken:v16.2.0
 [16.1.1]: https://github.com/gitkraken/vscode-gitlens/compare/v16.1.0...gitkraken:v16.1.1

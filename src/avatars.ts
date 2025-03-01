@@ -7,7 +7,7 @@ import type { CommitAuthor } from './git/models/author';
 import { getGitHubNoReplyAddressParts } from './git/remotes/github';
 import { configuration } from './system/-webview/configuration';
 import { getContext } from './system/-webview/context';
-import { debounce } from './system/function';
+import { debounce } from './system/function/debounce';
 import { filterMap } from './system/iterable';
 import { base64, equalsIgnoreCase } from './system/string';
 import type { ContactPresenceStatus } from './vsls/vsls';
@@ -276,7 +276,7 @@ const presenceStatusColorMap = new Map<ContactPresenceStatus, string>([
 	['offline', '#cecece'],
 ]);
 
-export function getPresenceDataUri(status: ContactPresenceStatus) {
+export function getPresenceDataUri(status: ContactPresenceStatus): string {
 	let dataUri = presenceCache.get(status);
 	if (dataUri == null) {
 		const contents = base64(`<?xml version="1.0" encoding="utf-8"?>
@@ -290,7 +290,7 @@ export function getPresenceDataUri(status: ContactPresenceStatus) {
 	return dataUri;
 }
 
-export function resetAvatarCache(reset: 'all' | 'failed' | 'fallback') {
+export function resetAvatarCache(reset: 'all' | 'failed' | 'fallback'): void {
 	switch (reset) {
 		case 'all':
 			void Container.instance.storage.delete('avatars');
@@ -324,7 +324,7 @@ function getDefaultGravatarStyle() {
 	return defaultGravatarsStyle;
 }
 
-export function setDefaultGravatarsStyle(style: GravatarDefaultStyle) {
+export function setDefaultGravatarsStyle(style: GravatarDefaultStyle): void {
 	defaultGravatarsStyle = style;
 	resetAvatarCache('fallback');
 }

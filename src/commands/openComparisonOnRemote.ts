@@ -19,10 +19,10 @@ export interface OpenComparisonOnRemoteCommandArgs {
 @command()
 export class OpenComparisonOnRemoteCommand extends GlCommandBase {
 	constructor(private readonly container: Container) {
-		super([GlCommand.OpenComparisonOnRemote, GlCommand.CopyRemoteComparisonUrl]);
+		super(['gitlens.openComparisonOnRemote', GlCommand.CopyRemoteComparisonUrl]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: OpenComparisonOnRemoteCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: OpenComparisonOnRemoteCommandArgs): Promise<void> {
 		if (context.type === 'viewItem') {
 			if (context.node.isAny('results-commits')) {
 				args = {
@@ -55,7 +55,7 @@ export class OpenComparisonOnRemoteCommand extends GlCommandBase {
 		return this.execute(args);
 	}
 
-	async execute(args?: OpenComparisonOnRemoteCommandArgs) {
+	async execute(args?: OpenComparisonOnRemoteCommandArgs): Promise<void> {
 		if (args?.repoPath == null || args.ref1 == null || args.ref2 == null) return;
 
 		try {

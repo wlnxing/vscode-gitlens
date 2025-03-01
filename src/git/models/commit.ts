@@ -1,6 +1,6 @@
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports
+/* eslint-disable @typescript-eslint/no-restricted-imports */ /* TODO need to deal with sharing rich class shapes to webviews */
 import { Uri } from 'vscode';
-import type { EnrichedAutolink } from '../../autolinks';
+import type { EnrichedAutolink } from '../../autolinks/models/autolinks';
 import { getAvatarUri, getCachedAvatarUri } from '../../avatars';
 import type { GravatarDefaultStyle } from '../../config';
 import { GlyphChars } from '../../constants';
@@ -17,6 +17,7 @@ import type { RemoteProvider } from '../remotes/remoteProvider';
 import { mapFilesWithStats } from '../utils/-webview/fileChange.utils';
 import { getChangedFilesCount } from '../utils/commit.utils';
 import { isSha, isUncommitted, isUncommittedParent, isUncommittedStaged } from '../utils/revision.utils';
+import type { GitDiffFileStats } from './diff';
 import type { GitFile } from './file';
 import { GitFileChange } from './fileChange';
 import type { PullRequest } from './pullRequest';
@@ -218,22 +219,31 @@ export class GitCommit implements GitRevisionReference {
 
 		// If the commit is "uncommitted", then have the files list be all uncommitted files
 		if (this.isUncommitted) {
-			const repository = this.container.git.getRepository(this.repoPath);
-			this._etagFileSystem = repository?.etagFileSystem;
+			const repo = this.container.git.getRepository(this.repoPath);
+			this._etagFileSystem = repo?.etagFileSystem;
 
 			if (this._etagFileSystem != null) {
-				const status = await this.container.git.status(this.repoPath).getStatus();
+				const status = await repo?.git.status().getStatus();
 				if (status != null) {
 					this._files = status.files.flatMap(f => f.getPseudoFileChanges());
+					if (isUncommittedStaged(this.sha)) {
+						this._files = this._files.filter(f => f.staged);
+					}
 				}
-				this._etagFileSystem = repository?.etagFileSystem;
+				this._etagFileSystem = repo?.etagFileSystem;
 			}
 
 			if (this._files == null) {
 				this._files = this.file != null ? [this.file] : [];
 			}
 
-			this._recomputeStats = true;
+			if (options?.include?.stats) {
+				const stats = await repo?.git.diff().getChangedFilesCount(this.sha);
+				this._stats = stats;
+				this._recomputeStats = false;
+			} else {
+				this._recomputeStats = true;
+			}
 
 			return;
 		}
@@ -334,16 +344,6 @@ export class GitCommit implements GitRevisionReference {
 	}
 
 	async findFile(
-		path: string,
-		staged?: boolean,
-		options?: { include?: { stats?: boolean } },
-	): Promise<GitFileChange | undefined>;
-	async findFile(
-		uri: Uri,
-		staged?: boolean,
-		options?: { include?: { stats?: boolean } },
-	): Promise<GitFileChange | undefined>;
-	async findFile(
 		pathOrUri: string | Uri,
 		staged?: boolean,
 		options?: { include?: { stats?: boolean } },
@@ -360,13 +360,13 @@ export class GitCommit implements GitRevisionReference {
 		return this._files?.find(f => f.path === relativePath);
 	}
 
-	formatDate(format?: string | null) {
+	formatDate(format?: string | null): string {
 		return this.container.CommitDateFormatting.dateSource === 'committed'
 			? this.committer.formatDate(format)
 			: this.author.formatDate(format);
 	}
 
-	formatDateFromNow(short?: boolean) {
+	formatDateFromNow(short?: boolean): string {
 		return this.container.CommitDateFormatting.dateSource === 'committed'
 			? this.committer.fromNow(short)
 			: this.author.fromNow(short);
@@ -555,12 +555,13 @@ export class GitCommit implements GitRevisionReference {
 		ref?: string,
 	): Promise<PreviousLineComparisonUrisResult | undefined> {
 		return this.file != null
-			? this.container.git.getPreviousComparisonUrisForLine(
-					this.repoPath,
-					this.file.uri,
-					editorLine,
-					ref ?? (this.sha === uncommitted ? undefined : this.sha),
-			  )
+			? this.container.git
+					.diff(this.repoPath)
+					.getPreviousComparisonUrisForLine(
+						this.file.uri,
+						editorLine,
+						ref ?? (this.sha === uncommitted ? undefined : this.sha),
+					)
 			: Promise.resolve(undefined);
 	}
 
@@ -573,11 +574,12 @@ export class GitCommit implements GitRevisionReference {
 						return this.file.previousSha;
 					}
 
-					const sha = await this.container.git.resolveReference(
-						this.repoPath,
-						isUncommitted(this.sha, true) ? 'HEAD' : `${this.sha}^`,
-						this.file.originalPath ?? this.file.path,
-					);
+					const sha = await this.container.git
+						.refs(this.repoPath)
+						.resolveReference(
+							isUncommitted(this.sha, true) ? 'HEAD' : `${this.sha}^`,
+							this.file.originalPath ?? this.file.path,
+						);
 
 					this._resolvedPreviousSha = sha;
 					return sha;
@@ -589,10 +591,9 @@ export class GitCommit implements GitRevisionReference {
 					return parent;
 				}
 
-				const sha = await this.container.git.resolveReference(
-					this.repoPath,
-					isUncommitted(this.sha, true) ? 'HEAD' : `${this.sha}^`,
-				);
+				const sha = await this.container.git
+					.refs(this.repoPath)
+					.resolveReference(isUncommitted(this.sha, true) ? 'HEAD' : `${this.sha}^`);
 
 				this._resolvedPreviousSha = sha;
 				return sha;
@@ -620,10 +621,11 @@ export class GitCommit implements GitRevisionReference {
 		lines?: GitCommitLine[];
 		stats?: GitCommitStats;
 	}): T {
-		let files;
+		let files: { file?: GitFileChange; files?: GitFileChange[] } | undefined = {
+			file: this._file,
+			files: this._files,
+		};
 		if (changes.files != null) {
-			files = { file: this._file, files: this._files };
-
 			if (changes.files.file != null) {
 				files.file = changes.files.file;
 			} else if (changes.files.file === null) {
@@ -707,11 +709,7 @@ export interface GitCommitLine {
 	line: number;
 }
 
-export interface GitCommitStats<
-	Files extends number | { added: number; deleted: number; changed: number } =
-		| number
-		| { added: number; deleted: number; changed: number },
-> {
+export interface GitCommitStats<Files extends number | GitDiffFileStats = number | GitDiffFileStats> {
 	readonly files: Files;
 	readonly additions: number;
 	readonly deletions: number;

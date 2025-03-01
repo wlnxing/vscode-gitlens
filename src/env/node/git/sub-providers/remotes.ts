@@ -6,7 +6,7 @@ import type { GitRemote } from '../../../../git/models/remote';
 import { parseGitRemotes } from '../../../../git/parsers/remoteParser';
 import { getRemoteProviderMatcher, loadRemoteProviders } from '../../../../git/remotes/remoteProviders';
 import { RemotesGitProviderBase } from '../../../../git/sub-providers/remotes';
-import { sortRemotes } from '../../../../git/utils/remote.utils';
+import { sortRemotes } from '../../../../git/utils/-webview/sorting';
 import { configuration } from '../../../../system/-webview/configuration';
 import { gate } from '../../../../system/decorators/-webview/gate';
 import { log } from '../../../../system/decorators/log';
@@ -40,16 +40,16 @@ export class RemotesGitSubProvider extends RemotesGitProviderBase implements Git
 			async function load(this: RemotesGitSubProvider): Promise<GitRemote[]> {
 				const providers = loadRemoteProviders(
 					configuration.get('remotes', this.container.git.getRepository(repoPath!)?.folder?.uri ?? null),
-					this.container.integrations.getConfiguredIntegrationDescriptors(),
+					await this.container.integrations.getConfigured(),
 				);
 
 				try {
-					const data = await this.git.remote(repoPath!);
+					const data = await this.git.exec({ cwd: repoPath }, 'remote', '-v');
 					const remotes = parseGitRemotes(
 						this.container,
 						data,
 						repoPath!,
-						getRemoteProviderMatcher(this.container, providers),
+						await getRemoteProviderMatcher(this.container, providers),
 					);
 					return remotes;
 				} catch (ex) {
@@ -79,7 +79,7 @@ export class RemotesGitSubProvider extends RemotesGitProviderBase implements Git
 	@gate()
 	@log()
 	async addRemote(repoPath: string, name: string, url: string, options?: { fetch?: boolean }): Promise<void> {
-		await this.git.remote__add(repoPath, name, url, options);
+		await this.git.exec({ cwd: repoPath }, 'remote', 'add', options?.fetch ? '-f' : undefined, name, url);
 		this.container.events.fire('git:cache:reset', { repoPath: repoPath, caches: ['remotes'] });
 	}
 
@@ -99,14 +99,14 @@ export class RemotesGitSubProvider extends RemotesGitProviderBase implements Git
 	@gate()
 	@log()
 	async pruneRemote(repoPath: string, name: string): Promise<void> {
-		await this.git.remote__prune(repoPath, name);
+		await this.git.exec({ cwd: repoPath }, 'remote', 'prune', name);
 		this.container.events.fire('git:cache:reset', { repoPath: repoPath, caches: ['remotes'] });
 	}
 
 	@gate()
 	@log()
 	async removeRemote(repoPath: string, name: string): Promise<void> {
-		await this.git.remote__remove(repoPath, name);
+		await this.git.exec({ cwd: repoPath }, 'remote', 'remove', name);
 		this.container.events.fire('git:cache:reset', { repoPath: repoPath, caches: ['remotes'] });
 	}
 }

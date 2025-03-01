@@ -13,7 +13,7 @@ import { getCommandUri } from './commandBase.utils';
 import type { CommandContext } from './commandContext';
 
 export interface GenerateCommitMessageCommandArgs {
-	repoPath?: string;
+	repoPath?: string | Uri;
 	source?: Sources;
 }
 
@@ -23,16 +23,19 @@ export class GenerateCommitMessageCommand extends ActiveEditorCommand {
 		super([GlCommand.GenerateCommitMessage, GlCommand.GenerateCommitMessageScm]);
 	}
 
-	protected override preExecute(context: CommandContext, args?: GenerateCommitMessageCommandArgs) {
+	protected override preExecute(context: CommandContext, args?: GenerateCommitMessageCommandArgs): Promise<void> {
 		let source: Sources | undefined = args?.source;
 		if (source == null && context.command === GlCommand.GenerateCommitMessageScm) {
 			source = 'scm-input';
+			if (context.type === 'scm' && context.scm.rootUri != null) {
+				args = { ...args, repoPath: context.scm.rootUri };
+			}
 		}
 
 		return this.execute(context.editor, context.uri, { ...args, source: source });
 	}
 
-	async execute(editor?: TextEditor, uri?: Uri, args?: GenerateCommitMessageCommandArgs) {
+	async execute(editor?: TextEditor, uri?: Uri, args?: GenerateCommitMessageCommandArgs): Promise<void> {
 		args = { ...args };
 
 		let repository;
@@ -52,9 +55,7 @@ export class GenerateCommitMessageCommand extends ActiveEditorCommand {
 
 		try {
 			const currentMessage = scmRepo.inputBox.value;
-			const message = await (
-				await this.container.ai
-			)?.generateCommitMessage(
+			const message = await this.container.ai.generateCommitMessage(
 				repository,
 				{ source: args?.source ?? 'commandPalette' },
 				{

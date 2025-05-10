@@ -12,7 +12,8 @@ import { GitUri, isGitUri } from './gitUri';
 import { deletedOrMissing } from './models/revision';
 import type { GitTreeEntry } from './models/tree';
 
-const emptyArray = new Uint8Array(0);
+const emptyArray = Object.freeze(new Uint8Array(0));
+const emptyDisposable: Disposable = Object.freeze({ dispose: () => {} });
 
 export function fromGitLensFSUri(uri: Uri): { path: string; ref: string; repoPath: string } {
 	const gitUri = isGitUri(uri) ? uri : GitUri.fromRevisionUri(uri);
@@ -57,7 +58,7 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		const { path, ref, repoPath } = fromGitLensFSUri(uri);
 
 		const tree = await this.getTree(path, ref, repoPath);
-		if (tree === undefined) throw FileSystemError.FileNotFound(uri);
+		if (tree == null) throw FileSystemError.FileNotFound(uri);
 
 		const items = [
 			...map<GitTreeEntry, [string, FileType]>(tree, t => [
@@ -87,12 +88,7 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 		const { path, ref, repoPath } = fromGitLensFSUri(uri);
 
 		if (ref === deletedOrMissing) {
-			return {
-				type: FileType.File,
-				size: 0,
-				ctime: 0,
-				mtime: 0,
-			};
+			return { type: FileType.File, size: 0, ctime: 0, mtime: 0 };
 		}
 
 		let treeItem;
@@ -102,16 +98,11 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 			// Add the fake root folder to the path
 			treeItem = (await searchTree).get(`/~/${path}`);
 		} else {
-			if (path == null || path.length === 0) {
+			if (!path) {
 				const tree = await this.getTree(path, ref, repoPath);
 				if (tree == null) throw FileSystemError.FileNotFound(uri);
 
-				return {
-					type: FileType.Directory,
-					size: 0,
-					ctime: 0,
-					mtime: 0,
-				};
+				return { type: FileType.Directory, size: 0, ctime: 0, mtime: 0 };
 			}
 
 			treeItem = await this.container.git.revision(repoPath).getTreeEntryForRevision(ref, path);
@@ -119,20 +110,11 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 
 		if (treeItem == null) throw FileSystemError.FileNotFound(uri);
 
-		return {
-			type: typeToFileType(treeItem.type),
-			size: treeItem.size,
-			ctime: 0,
-			mtime: 0,
-		};
+		return { type: typeToFileType(treeItem.type), size: treeItem.size, ctime: 0, mtime: 0 };
 	}
 
 	watch(): Disposable {
-		return {
-			dispose: () => {
-				// nothing to dispose
-			},
-		};
+		return emptyDisposable;
 	}
 
 	writeFile(uri: Uri): void | Thenable<void> {
@@ -154,7 +136,7 @@ export class GitFileSystemProvider implements FileSystemProvider, Disposable {
 
 	private getOrCreateSearchTree(ref: string, repoPath: string) {
 		let searchTree = this._searchTreeMap.get(ref);
-		if (searchTree === undefined) {
+		if (searchTree == null) {
 			searchTree = this.createSearchTree(ref, repoPath);
 			this._searchTreeMap.set(ref, searchTree);
 		}

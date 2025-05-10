@@ -33,6 +33,7 @@ type InternalGraphWebviewCommands =
 	| 'gitlens.graph.skipPausedOperation';
 
 type InternalHomeWebviewCommands =
+	| 'gitlens.home.changeBranchMergeTarget'
 	| 'gitlens.home.deleteBranchOrWorktree'
 	| 'gitlens.home.pushBranch'
 	| 'gitlens.home.openMergeTargetComparison'
@@ -53,6 +54,8 @@ type InternalHomeWebviewCommands =
 	| 'gitlens.home.skipPausedOperation'
 	| 'gitlens.home.continuePausedOperation'
 	| 'gitlens.home.abortPausedOperation'
+	| 'gitlens.home.explainWip'
+	| 'gitlens.home.ai.explainBranch'
 	| 'gitlens.home.openRebaseEditor';
 
 type InternalHomeWebviewViewCommands =
@@ -81,12 +84,16 @@ type InternalTimelineWebviewViewCommands = 'gitlens.views.timeline.openInTab';
 
 type InternalWalkthroughCommands =
 	| 'gitlens.walkthrough.connectIntegrations'
+	| 'gitlens.walkthrough.enableAiSetting'
 	| 'gitlens.walkthrough.gitlensInspect'
 	| 'gitlens.walkthrough.openAcceleratePrReviews'
+	| 'gitlens.walkthrough.openAiCustomInstructionsSettings'
+	| 'gitlens.walkthrough.openAiSettings'
 	| 'gitlens.walkthrough.openCommunityVsPro'
 	| 'gitlens.walkthrough.openHelpCenter'
 	| 'gitlens.walkthrough.openHomeViewVideo'
 	| 'gitlens.walkthrough.openInteractiveCodeHistory'
+	| 'gitlens.walkthrough.openLearnAboutAiFeatures'
 	| 'gitlens.walkthrough.openStartIntegrations'
 	| 'gitlens.walkthrough.openStreamlineCollaboration'
 	| 'gitlens.walkthrough.openWalkthrough'
@@ -98,11 +105,13 @@ type InternalWalkthroughCommands =
 	| 'gitlens.walkthrough.showGraph'
 	| 'gitlens.walkthrough.showHomeView'
 	| 'gitlens.walkthrough.showLaunchpad'
+	| 'gitlens.walkthrough.switchAIModel'
 	| 'gitlens.walkthrough.worktree.create'
 	| 'gitlens.walkthrough.openDevExPlatform';
 
 type InternalGlCommands =
 	| `gitlens.action.${string}`
+	| 'gitlens.changeBranchMergeTarget'
 	| 'gitlens.diffWith'
 	| 'gitlens.openOnRemote'
 	| 'gitlens.openWalkthrough'

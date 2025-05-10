@@ -90,7 +90,7 @@ export class ContributorNode extends ViewNode<'contributor', ViewsWithContributo
 			this.contributor.stats != null
 				? ` (${pluralize('file', this.contributor.stats.files)}, +${formatNumeric(
 						this.contributor.stats.additions,
-				  )} -${formatNumeric(this.contributor.stats.additions)} ${pluralize(
+				  )} -${formatNumeric(this.contributor.stats.deletions)} ${pluralize(
 						'line',
 						this.contributor.stats.additions + this.contributor.stats.deletions,
 						{ only: true },
@@ -111,7 +111,7 @@ export class ContributorNode extends ViewNode<'contributor', ViewsWithContributo
 				: ''
 		}${this.contributor.latestCommitDate != null ? `${this.contributor.formatDateFromNow()}, ` : ''}${pluralize(
 			'commit',
-			this.contributor.commits,
+			this.contributor.contributionCount,
 		)}${shortStats}`;
 
 		let avatarUri;
@@ -124,7 +124,7 @@ export class ContributorNode extends ViewNode<'contributor', ViewsWithContributo
 			});
 
 			if (presence != null) {
-				const title = `${this.contributor.commits ? 'You are' : `${this.contributor.label} is`} ${
+				const title = `${this.contributor.contributionCount ? 'You are' : `${this.contributor.label} is`} ${
 					presence.status === 'dnd' ? 'in ' : ''
 				}${presence.statusText.toLocaleLowerCase()}`;
 
@@ -160,7 +160,7 @@ export class ContributorNode extends ViewNode<'contributor', ViewsWithContributo
 		const markdown = new MarkdownString(
 			`${avatarMarkdown != null ? avatarMarkdown : ''} &nbsp;${link} \n\n${lastCommitted}${pluralize(
 				'commit',
-				this.contributor.commits,
+				this.contributor.contributionCount,
 			)}${stats}`,
 		);
 		markdown.supportHtml = true;
@@ -172,7 +172,6 @@ export class ContributorNode extends ViewNode<'contributor', ViewsWithContributo
 		return item;
 	}
 
-	@gate()
 	@debug()
 	override refresh(reset?: boolean): void {
 		if (reset) {

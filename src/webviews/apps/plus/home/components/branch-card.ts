@@ -265,7 +265,7 @@ export abstract class GlBranchCardBase extends GlElement {
 
 	@consume<State>({ context: stateContext, subscribe: true })
 	@state()
-	private _homeState!: State;
+	protected _homeState!: State;
 
 	@property()
 	repo!: string;
@@ -798,6 +798,7 @@ export abstract class GlBranchCardBase extends GlElement {
 							>Create a Pull Request</gl-button
 						>
 						${this._homeState.orgSettings.ai &&
+						this._homeState.aiEnabled &&
 						this.remote?.provider?.supportedFeatures?.createPullRequestWithDetails
 							? html`<gl-button
 									class="branch-item__missing"
@@ -999,12 +1000,44 @@ export class GlBranchCard extends GlBranchCardBase {
 					href=${this.createCommandLink('gitlens.home.openWorktree')}
 				></action-item>`,
 			);
+
+			const hasWip =
+				this.wip?.workingTreeState != null
+					? this.wip.workingTreeState.added +
+							this.wip.workingTreeState.changed +
+							this.wip.workingTreeState.deleted >
+					  0
+					: false;
+			if (hasWip) {
+				actions.push(
+					html`<action-item
+						label="Explain Working Changes (Preview)"
+						icon="sparkle"
+						href=${this.createCommandLink('gitlens.home.explainWip')}
+					></action-item>`,
+				);
+			} else {
+				actions.push(
+					html`<action-item
+						label="Explain Branch (Preview)"
+						icon="sparkle"
+						href=${this.createCommandLink('gitlens.home.ai.explainBranch')}
+					></action-item>`,
+				);
+			}
 		} else {
 			actions.push(
 				html`<action-item
 					label="Switch to Branch..."
 					icon="gl-switch"
 					href=${this.createCommandLink('gitlens.home.switchToBranch')}
+				></action-item>`,
+			);
+			actions.push(
+				html`<action-item
+					label="Explain Branch (Preview)"
+					icon="sparkle"
+					href=${this.createCommandLink('gitlens.home.ai.explainBranch')}
 				></action-item>`,
 			);
 		}

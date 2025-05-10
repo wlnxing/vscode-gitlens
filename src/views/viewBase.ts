@@ -453,8 +453,14 @@ export abstract class ViewBase<
 		return this.root;
 	}
 
+	/** Tracks whether the view has been initialized and should avoid a duplicate refresh */
+	private _skipNextVisibilityChange: boolean = false;
+
 	getChildren(node?: ViewNode): ViewNode[] | Promise<ViewNode[]> {
 		if (node != null) return node.getChildren();
+
+		// If we are already visible, then skip the next visibility change event otherwise we end up refreshing twice
+		this._skipNextVisibilityChange = this.tree?.visible ?? false;
 
 		const root = this.ensureRoot();
 		const children = root.getChildren();
@@ -527,7 +533,13 @@ export abstract class ViewBase<
 			void this.container.usage.track(`${this.trackingFeature}:shown`).catch();
 		}
 
-		this._onDidChangeVisibility.fire(e);
+		const skip = this._skipNextVisibilityChange;
+		this._skipNextVisibilityChange = false;
+
+		if (!skip || !e.visible) {
+			this._onDidChangeVisibility.fire(e);
+		}
+
 		if (e.visible) {
 			this.notifySelections();
 		}
@@ -750,8 +762,8 @@ export abstract class ViewBase<
 
 	@debug<ViewBase<Type, RootNode, ViewConfig>['refreshNode']>({ args: { 0: n => n.toString() } })
 	async refreshNode(node: ViewNode, reset: boolean = false, force: boolean = false): Promise<void> {
-		const cancel = await node.refresh?.(reset);
-		if (!force && cancel === true) return;
+		const result = await node.refresh?.(reset);
+		if (!force && result?.cancel === true) return;
 
 		this.triggerNodeChange(node);
 	}

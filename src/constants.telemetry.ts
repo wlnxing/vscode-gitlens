@@ -11,7 +11,7 @@ import type { Subscription, SubscriptionAccount } from './plus/gk/models/subscri
 import type { Flatten } from './system/object';
 import type { WalkthroughContextKeys } from './telemetry/walkthroughStateProvider';
 import type { GraphColumnConfig } from './webviews/plus/graph/protocol';
-import type { Period } from './webviews/plus/timeline/protocol';
+import type { TimelineItemType, TimelinePeriod, TimelineSliceBy } from './webviews/plus/timeline/protocol';
 
 export declare type AttributeValue =
 	| string
@@ -135,9 +135,9 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 	/** Sent when the user changes the current repository on the Commit Graph */
 	'graph/repository/changed': GraphRepositoryChangedEvent;
 
-	/** Sent when the user hovers over a row on the Commit Graph */
-	'graph/row/hovered': GraphContextEventData;
-	/** Sent when the user selects (clicks on) a row or rows on the Commit Graph */
+	/** Sent when the user hovers over a row on the Commit Graph (first time and every 100 times after) */
+	'graph/row/hovered': GraphRowHoveredEvent;
+	/** Sent when the user selects (clicks on) a row or rows on the Commit Graph (first time and every 100 times after) */
 	'graph/row/selected': GraphRowSelectedEvent;
 	/** Sent when rows are loaded into the Commit Graph */
 	'graph/rows/loaded': GraphRowsLoadedEvent;
@@ -157,6 +157,8 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 	'home/createBranch': void;
 	/** Sent when the user chooses to start work on an issue from the home view */
 	'home/startWork': void;
+	/** Sent when the user starts defining a user-specific merge target branch */
+	'home/changeBranchMergeTarget': void;
 
 	/** Sent when the user takes an action on the Launchpad title bar */
 	'launchpad/title/action': LaunchpadTitleActionEvent;
@@ -255,14 +257,14 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 
 	/** Sent when the Visual History is shown */
 	'timeline/shown': TimelineShownEvent;
-	/** Sent when the user changes the period (timeframe) on the Visual History */
+	/** Sent when the user clicks on the "Open in Editor" button on the Visual History */
 	'timeline/action/openInEditor': TimelineContextEventData;
 	/** Sent when the editor changes on the Visual History */
 	'timeline/editor/changed': TimelineContextEventData;
-	/** Sent when the user changes the period (timeframe) on the Visual History */
-	'timeline/period/changed': TimelinePeriodChangedEvent;
 	/** Sent when the user selects (clicks on) a commit on the Visual History */
 	'timeline/commit/selected': TimelineContextEventData;
+	/** Sent when the user changes the configuration of the Visual History (e.g. period, show all branches, etc) */
+	'timeline/config/changed': TimelineConfigChangedEvent;
 
 	/** Sent when a "tracked feature" is interacted with, today that is only when webview/webviewView/custom editor is shown */
 	'usage/track': UsageTrackEvent;
@@ -325,6 +327,7 @@ interface AIEventDataBase {
 	'warning.exceededLargePromptThreshold'?: boolean;
 	'warning.promptTruncated'?: boolean;
 
+	failed?: boolean;
 	'failed.reason'?: 'user-declined' | 'user-cancelled' | 'error';
 	'failed.cancelled.reason'?: 'large-prompt';
 	'failed.error'?: string;
@@ -333,7 +336,7 @@ interface AIEventDataBase {
 
 interface AIExplainEvent extends AIEventDataBase {
 	type: 'change';
-	changeType: 'wip' | 'stash' | 'commit' | `draft-${'patch' | 'stash' | 'suggested_pr_change'}`;
+	changeType: 'wip' | 'stash' | 'commit' | 'branch' | `draft-${'patch' | 'stash' | 'suggested_pr_change'}`;
 }
 
 export interface AIGenerateCommitEventData extends AIEventDataBase {
@@ -542,8 +545,13 @@ interface GraphFiltersChangedEvent extends GraphContextEventData {
 
 interface GraphRepositoryChangedEvent extends RepositoryEventData, GraphContextEventData {}
 
+interface GraphRowHoveredEvent extends GraphContextEventData {
+	count: number;
+}
+
 interface GraphRowSelectedEvent extends GraphContextEventData {
 	rows: number;
+	count: number;
 }
 
 interface GraphRowsLoadedEvent extends GraphContextEventData {
@@ -555,6 +563,10 @@ interface GraphSearchedEvent extends GraphContextEventData {
 	types: string;
 	duration: number;
 	matches: number;
+	failed?: boolean;
+	'failed.reason'?: 'cancelled' | 'error';
+	'failed.error'?: string;
+	'failed.error.detail'?: string;
 }
 
 type GraphDetailsShownEvent = WebviewShownEventData & InspectShownEventData;
@@ -862,7 +874,10 @@ export interface SubscriptionEventDataWithPrevious
 		Partial<SubscriptionPreviousEventData> {}
 
 type TimelineContextEventData = WebviewTelemetryContext & {
-	'context.period': string | undefined;
+	'context.itemType': TimelineItemType | undefined;
+	'context.period': TimelinePeriod | undefined;
+	'context.showAllBranches': boolean | undefined;
+	'context.sliceBy': TimelineSliceBy | undefined;
 };
 export type TimelineTelemetryContext = TimelineContextEventData;
 
@@ -871,9 +886,10 @@ export type TimelineShownTelemetryContext = TimelineShownEventData;
 
 type TimelineShownEvent = WebviewShownEventData & TimelineShownEventData;
 
-interface TimelinePeriodChangedEvent extends TimelineContextEventData {
-	'period.old': Period | undefined;
-	'period.new': Period;
+interface TimelineConfigChangedEvent extends TimelineContextEventData {
+	period: TimelinePeriod;
+	showAllBranches: boolean;
+	sliceBy: TimelineSliceBy;
 }
 
 interface UsageTrackEvent {
@@ -886,6 +902,10 @@ interface WalkthroughEvent {
 }
 
 type WalkthroughActionNames =
+	| 'open/ai-custom-instructions-settings'
+	| 'open/ai-enable-setting'
+	| 'open/ai-settings'
+	| 'open/help-center/ai-features'
 	| 'open/help-center/start-integrations'
 	| 'open/help-center/accelerate-pr-reviews'
 	| 'open/help-center/streamline-collaboration'
@@ -905,11 +925,12 @@ type WalkthroughActionNames =
 	| 'plus/upgrade'
 	| 'plus/reactivate'
 	| 'open/walkthrough'
-	| 'open/inspect';
+	| 'open/inspect'
+	| 'switch/ai-model';
 
 type WalkthroughActionEvent =
-	| { type: 'command'; name: WalkthroughActionNames; command: string }
-	| { type: 'url'; name: WalkthroughActionNames; url: string };
+	| { type: 'command'; name: WalkthroughActionNames; command: string; detail?: string }
+	| { type: 'url'; name: WalkthroughActionNames; url: string; detail?: string };
 
 interface WalkthroughCompletionEvent {
 	'context.key': WalkthroughContextKeys;

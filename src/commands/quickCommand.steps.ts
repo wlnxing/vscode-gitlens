@@ -52,6 +52,7 @@ import {
 	CommitCompareWithWorkingCommandQuickPickItem,
 	CommitCopyIdQuickPickItem,
 	CommitCopyMessageQuickPickItem,
+	CommitExplainCommandQuickPickItem,
 	CommitFileQuickPickItem,
 	CommitFilesQuickPickItem,
 	CommitOpenAllChangesCommandQuickPickItem,
@@ -296,7 +297,7 @@ export async function getBranchesAndOrTags(
 		filter?: { branches?: (b: GitBranch) => boolean; tags?: (t: GitTag) => boolean };
 		picked?: string | string[];
 		sort?: boolean | { branches?: BranchSortOptions; tags?: TagSortOptions };
-	} = {},
+	},
 ): Promise<(BranchQuickPickItem | TagQuickPickItem)[]> {
 	if (repos == null) return [];
 
@@ -780,6 +781,84 @@ export function* pickBranchStep<
 	});
 
 	const selection: StepSelection<typeof step> = yield step;
+	return canPickStepContinue(step, state, selection) ? selection[0].item : StepResultBreak;
+}
+
+export function* pickOrResetBranchStep<
+	State extends PartialStepState & { repo: Repository },
+	Context extends { repos: Repository[]; showTags?: boolean; title: string },
+>(
+	state: State,
+	context: Context,
+	{
+		filter,
+		picked,
+		placeholder,
+		title,
+		resetTitle,
+		resetDescription,
+	}: {
+		filter?: (b: GitBranch) => boolean;
+		picked?: string | string[];
+		placeholder: string;
+		title?: string;
+		resetTitle: string;
+		resetDescription: string;
+	},
+): StepResultGenerator<GitBranchReference | undefined> {
+	const items = getBranches(state.repo, {
+		buttons: [RevealInSideBarQuickInputButton],
+		filter: filter,
+		picked: picked,
+	}).then(branches =>
+		branches.length === 0
+			? [createDirectiveQuickPickItem(Directive.Back, true), createDirectiveQuickPickItem(Directive.Cancel)]
+			: [
+					createDirectiveQuickPickItem(Directive.Reset, false, {
+						label: resetTitle,
+						description: resetDescription,
+					}),
+					...branches,
+			  ],
+	);
+
+	const resetButton: QuickInputButton = {
+		iconPath: new ThemeIcon('notebook-revert'),
+		tooltip: resetDescription || resetTitle,
+	};
+	let resetButtonClicked = false;
+	const step = createPickStep<BranchQuickPickItem>({
+		title: appendReposToTitle(title ?? context.title, state, context),
+		placeholder: count => (!count ? `No branches found in ${state.repo.formattedName}` : placeholder),
+		matchOnDetail: true,
+		items: items,
+		additionalButtons: [resetButton],
+		onDidClickButton: (_quickpick, button) => {
+			if (button === resetButton) {
+				resetButtonClicked = true;
+				return true;
+			}
+			return false;
+		},
+		onDidClickItemButton: (_quickpick, button, { item }) => {
+			if (button === RevealInSideBarQuickInputButton) {
+				void BranchActions.reveal(item, { select: true, focus: false, expand: true });
+			}
+		},
+		keys: ['right', 'alt+right', 'ctrl+right'],
+		onDidPressKey: async (_quickpick, _key, { item }) => {
+			await BranchActions.reveal(item, {
+				select: true,
+				focus: false,
+				expand: true,
+			});
+		},
+	});
+
+	const selection: StepSelection<typeof step> = yield step;
+	if (resetButtonClicked) {
+		return undefined;
+	}
 	return canPickStepContinue(step, state, selection) ? selection[0].item : StepResultBreak;
 }
 
@@ -1368,7 +1447,7 @@ export function* pickContributorsStep<
 
 		const items = [];
 
-		for (const c of await state.repo.git.contributors().getContributors()) {
+		for (const c of await state.repo.git.contributors().getContributorsLite()) {
 			items.push(
 				await createContributorQuickPickItem(c, message?.includes(c.getCoauthor()), {
 					buttons: [RevealInSideBarQuickInputButton],
@@ -1538,7 +1617,16 @@ export async function* pickRepositoryStep<
 		state.repo = Container.instance.git.getRepository(state.repo);
 		if (state.repo != null) return state.repo;
 	}
-	const active = state.repo ?? (await Container.instance.git.getOrOpenRepositoryForEditor());
+	let active;
+	try {
+		active = state.repo ?? (await Container.instance.git.getOrOpenRepositoryForEditor());
+	} catch (ex) {
+		Logger.log(
+			'pickRepositoryStep: failed to get active repository. Normally it happens when the currently open file does not belong to a repository',
+			ex,
+		);
+		active = undefined;
+	}
 
 	const step = createPickStep<RepositoryQuickPickItem>({
 		title: context.title,
@@ -2062,6 +2150,8 @@ async function getShowCommitOrStashStepItems<
 			new CommitCopyMessageQuickPickItem(state.reference),
 		);
 	} else {
+		items.push(createQuickPickSeparator(), new CommitExplainCommandQuickPickItem(state.reference));
+
 		const remotes = await state.repo.git.remotes().getRemotesWithProviders({ sort: true });
 		if (remotes?.length) {
 			items.push(
@@ -2263,7 +2353,7 @@ export function* showCommitOrStashFilesStep<
 				hint: `Click to see ${isStash(state.reference) ? 'stash' : 'commit'} actions`,
 			}),
 			createQuickPickSeparator('Files'),
-			...(state.reference.fileset?.files.map(
+			...(state.reference.anyFiles?.map(
 				fs => new CommitFileQuickPickItem(state.reference, fs, options?.picked === fs.path),
 			) ?? []),
 		] as (CommitFilesQuickPickItem | CommitFileQuickPickItem)[],
@@ -2400,6 +2490,8 @@ async function getShowCommitOrStashFileStepItems<
 			new CommitCopyMessageQuickPickItem(state.reference),
 		);
 	} else {
+		items.push(createQuickPickSeparator(), new CommitExplainCommandQuickPickItem(state.reference));
+
 		const remotes = await state.repo.git.remotes().getRemotesWithProviders({ sort: true });
 		if (remotes?.length) {
 			items.push(

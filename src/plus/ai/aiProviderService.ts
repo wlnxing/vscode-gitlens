@@ -3,11 +3,14 @@ import { CancellationTokenSource, env, EventEmitter, window } from 'vscode';
 import type { AIPrimaryProviders, AIProviderAndModel, AIProviders, SupportedAIModels } from '../../constants.ai';
 import {
 	anthropicProviderDescriptor,
+	azureProviderDescriptor,
 	deepSeekProviderDescriptor,
 	geminiProviderDescriptor,
 	githubProviderDescriptor,
 	gitKrakenProviderDescriptor,
 	huggingFaceProviderDescriptor,
+	ollamaProviderDescriptor,
+	openAICompatibleProviderDescriptor,
 	openAIProviderDescriptor,
 	openRouterProviderDescriptor,
 	vscodeProviderDescriptor,
@@ -34,7 +37,6 @@ import { assertsCommitHasFullDetails } from '../../git/utils/commit.utils';
 import { showAIModelPicker, showAIProviderPicker } from '../../quickpicks/aiModelPicker';
 import { Directive, isDirective } from '../../quickpicks/items/directive';
 import { configuration } from '../../system/-webview/configuration';
-import { getContext } from '../../system/-webview/context';
 import type { Storage } from '../../system/-webview/storage';
 import { debounce } from '../../system/function/debounce';
 import { map } from '../../system/iterable';
@@ -56,8 +58,14 @@ import type {
 	AIProviderDescriptorWithConfiguration,
 	AIProviderDescriptorWithType,
 } from './models/model';
-import type { PromptTemplate, PromptTemplateContext, PromptTemplateType } from './models/promptTemplates';
+import type {
+	PromptTemplate,
+	PromptTemplateContext,
+	PromptTemplateId,
+	PromptTemplateType,
+} from './models/promptTemplates';
 import type { AIChatMessage, AIProvider, AIRequestResult } from './models/provider';
+import { ensureAccess } from './utils/-webview/ai.utils';
 import { getLocalPromptTemplate, resolvePrompt } from './utils/-webview/prompt.utils';
 
 export interface AIResult {
@@ -101,6 +109,8 @@ export interface AIModelChangeEvent {
 	readonly model: AIModel | undefined;
 }
 
+export type AIExplainSource = Source & { type: TelemetryEvents['ai/explain']['changeType'] };
+
 // Order matters for sorting the picker
 const supportedAIProviders = new Map<AIProviders, AIProviderDescriptorWithType>([
 	[
@@ -120,13 +130,6 @@ const supportedAIProviders = new Map<AIProviders, AIProviderDescriptorWithType>(
 		},
 	],
 	[
-		'openai',
-		{
-			...openAIProviderDescriptor,
-			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './openaiProvider')).OpenAIProvider),
-		},
-	],
-	[
 		'anthropic',
 		{
 			...anthropicProviderDescriptor,
@@ -143,17 +146,34 @@ const supportedAIProviders = new Map<AIProviders, AIProviderDescriptorWithType>(
 		},
 	],
 	[
-		'deepseek',
+		'openai',
 		{
-			...deepSeekProviderDescriptor,
-			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './deepSeekProvider')).DeepSeekProvider),
+			...openAIProviderDescriptor,
+			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './openaiProvider')).OpenAIProvider),
 		},
 	],
 	[
-		'xai',
+		'azure',
 		{
-			...xAIProviderDescriptor,
-			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './xaiProvider')).XAIProvider),
+			...azureProviderDescriptor,
+			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './azureProvider')).AzureProvider),
+		},
+	],
+	[
+		'openaicompatible',
+		{
+			...openAICompatibleProviderDescriptor,
+			type: lazy(
+				async () =>
+					(await import(/* webpackChunkName: "ai" */ './openAICompatibleProvider')).OpenAICompatibleProvider,
+			),
+		},
+	],
+	[
+		'ollama',
+		{
+			...ollamaProviderDescriptor,
+			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './ollamaProvider')).OllamaProvider),
 		},
 	],
 	[
@@ -162,6 +182,15 @@ const supportedAIProviders = new Map<AIProviders, AIProviderDescriptorWithType>(
 			...openRouterProviderDescriptor,
 			type: lazy(
 				async () => (await import(/* webpackChunkName: "ai" */ './openRouterProvider')).OpenRouterProvider,
+			),
+		},
+	],
+	[
+		'huggingface',
+		{
+			...huggingFaceProviderDescriptor,
+			type: lazy(
+				async () => (await import(/* webpackChunkName: "ai" */ './huggingFaceProvider')).HuggingFaceProvider,
 			),
 		},
 	],
@@ -175,12 +204,17 @@ const supportedAIProviders = new Map<AIProviders, AIProviderDescriptorWithType>(
 		},
 	],
 	[
-		'huggingface',
+		'deepseek',
 		{
-			...huggingFaceProviderDescriptor,
-			type: lazy(
-				async () => (await import(/* webpackChunkName: "ai" */ './huggingFaceProvider')).HuggingFaceProvider,
-			),
+			...deepSeekProviderDescriptor,
+			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './deepSeekProvider')).DeepSeekProvider),
+		},
+	],
+	[
+		'xai',
+		{
+			...xAIProviderDescriptor,
+			type: lazy(async () => (await import(/* webpackChunkName: "ai" */ './xaiProvider')).XAIProvider),
 		},
 	],
 ]);
@@ -193,9 +227,8 @@ export class AIProviderService implements Disposable {
 
 	private readonly _disposable: Disposable;
 	private _model: AIModel | undefined;
-	private readonly _promptTemplates = new PromiseCache<PromptTemplateType, PromptTemplate>({
+	private readonly _promptTemplates = new PromiseCache<PromptTemplateId, PromptTemplate | undefined>({
 		createTTL: 12 * 60 * 60 * 1000, // 12 hours
-		expireOnError: true,
 	});
 	private _provider: AIProvider | undefined;
 	private _providerDisposable: Disposable | undefined;
@@ -435,18 +468,8 @@ export class AIProviderService implements Disposable {
 		return model;
 	}
 
-	private async ensureOrgAccess(): Promise<boolean> {
-		const orgEnabled = getContext('gitlens:gk:organization:ai:enabled');
-		if (orgEnabled === false) {
-			await window.showErrorMessage(`AI features have been disabled for your organization.`);
-			return false;
-		}
-
-		return true;
-	}
-
 	private async ensureFeatureAccess(feature: AIFeatures, source: Source): Promise<boolean> {
-		if (!(await this.ensureOrgAccess())) return false;
+		if (!(await ensureAccess())) return false;
 
 		if (feature === 'generate-commitMessage') return true;
 		if (
@@ -467,14 +490,11 @@ export class AIProviderService implements Disposable {
 
 	async explainCommit(
 		commitOrRevision: GitRevisionReference | GitCommit,
-		sourceContext: Source & { type: TelemetryEvents['ai/explain']['changeType'] },
+		sourceContext: AIExplainSource,
 		options?: { cancellation?: CancellationToken; progress?: ProgressOptions },
 	): Promise<AISummarizeResult | undefined> {
-		const { type, ...source } = sourceContext;
-
-		const result = await this.sendRequest(
-			'explain-changes',
-			async (model, reporting, cancellation, maxInputTokens, retries) => {
+		return this.explainChanges(
+			async cancellation => {
 				const diff = await this.container.git.diff(commitOrRevision.repoPath).getDiff?.(commitOrRevision.ref);
 				if (!diff?.contents) throw new AINoRequestDataError('No changes found to explain.');
 				if (cancellation.isCancellationRequested) throw new CancellationError();
@@ -482,24 +502,51 @@ export class AIProviderService implements Disposable {
 				const commit = isCommit(commitOrRevision)
 					? commitOrRevision
 					: await this.container.git.commits(commitOrRevision.repoPath).getCommit(commitOrRevision.ref);
-				if (commit == null) throw new AINoRequestDataError('Unable to find commit');
+				if (commit == null) throw new AINoRequestDataError('No commit found to explain.');
 				if (cancellation.isCancellationRequested) throw new CancellationError();
 
 				if (!commit.hasFullDetails()) {
 					await commit.ensureFullDetails();
 					assertsCommitHasFullDetails(commit);
-
 					if (cancellation.isCancellationRequested) throw new CancellationError();
 				}
+
+				return {
+					diff: diff.contents,
+					message: commit.message,
+				};
+			},
+			sourceContext,
+			options,
+		);
+	}
+
+	async explainChanges(
+		promptContext:
+			| PromptTemplateContext<'explain-changes'>
+			| ((cancellationToken: CancellationToken) => Promise<PromptTemplateContext<'explain-changes'>>),
+		sourceContext: AIExplainSource,
+		options?: { cancellation?: CancellationToken; progress?: ProgressOptions },
+	): Promise<AISummarizeResult | undefined> {
+		const { type, ...source } = sourceContext;
+
+		const result = await this.sendRequest(
+			'explain-changes',
+			async (model, reporting, cancellation, maxInputTokens, retries) => {
+				if (typeof promptContext === 'function') {
+					promptContext = await promptContext(cancellation);
+				}
+
+				promptContext.instructions = `${
+					promptContext.instructions ? `${promptContext.instructions}\n` : ''
+				}${configuration.get('ai.explainChanges.customInstructions')}`;
+
+				if (cancellation.isCancellationRequested) throw new CancellationError();
 
 				const { prompt } = await this.getPrompt(
 					'explain-changes',
 					model,
-					{
-						diff: diff.contents,
-						message: commit.message,
-						instructions: configuration.get('ai.explainChanges.customInstructions'),
-					},
+					promptContext,
 					maxInputTokens,
 					retries,
 					reporting,
@@ -594,31 +641,21 @@ export class AIProviderService implements Disposable {
 		const result = await this.sendRequest(
 			'generate-create-pullRequest',
 			async (model, reporting, cancellation, maxInputTokens, retries) => {
-				const [diffResult, logResult] = await Promise.allSettled([
-					repo.git.diff().getDiff?.(headRef, baseRef, { notation: '...' }),
-					repo.git.commits().getLog(`${baseRef}..${headRef}`),
-				]);
+				const compareData = await prepareCompareDataForAIRequest(repo, headRef, baseRef, {
+					cancellation: cancellation,
+				});
 
-				const diff = getSettledValue(diffResult);
-				const log = getSettledValue(logResult);
-
-				if (!diff?.contents || !log?.commits?.size) {
+				if (!compareData?.diff || !compareData?.logMessages) {
 					throw new AINoRequestDataError('No changes to generate a pull request from.');
 				}
 
-				if (cancellation.isCancellationRequested) throw new CancellationError();
-
-				const commitMessages: string[] = [];
-				for (const commit of [...log.commits.values()].sort((a, b) => a.date.getTime() - b.date.getTime())) {
-					commitMessages.push(commit.message ?? commit.summary);
-				}
-
+				const { diff, logMessages } = compareData;
 				const { prompt } = await this.getPrompt(
 					'generate-create-pullRequest',
 					model,
 					{
-						diff: diff.contents,
-						data: commitMessages.join('\n'),
+						diff: diff,
+						data: logMessages,
 						context: options?.context,
 						instructions: configuration.get('ai.generateCreatePullRequest.customInstructions'),
 					},
@@ -854,6 +891,7 @@ export class AIProviderService implements Disposable {
 				telementry.key,
 				{
 					...telementry.data,
+					failed: true,
 					'failed.reason': cancellation.isCancellationRequested ? 'user-cancelled' : 'user-declined',
 				},
 				source,
@@ -868,8 +906,8 @@ export class AIProviderService implements Disposable {
 			this.container.telemetry.sendEvent(
 				telementry.key,
 				cancellation.isCancellationRequested
-					? { ...telementry.data, 'failed.reason': 'user-cancelled' }
-					: { ...telementry.data, 'failed.reason': 'error', 'failed.error': 'Not authorized' },
+					? { ...telementry.data, failed: true, 'failed.reason': 'user-cancelled' }
+					: { ...telementry.data, failed: true, 'failed.reason': 'error', 'failed.error': 'Not authorized' },
 				source,
 			);
 
@@ -919,7 +957,12 @@ export class AIProviderService implements Disposable {
 			if (ex instanceof CancellationError) {
 				this.container.telemetry.sendEvent(
 					telementry.key,
-					{ ...telementry.data, duration: Date.now() - start, 'failed.reason': 'user-cancelled' },
+					{
+						...telementry.data,
+						duration: Date.now() - start,
+						failed: true,
+						'failed.reason': 'user-cancelled',
+					},
 					source,
 				);
 
@@ -931,6 +974,7 @@ export class AIProviderService implements Disposable {
 					{
 						...telementry.data,
 						duration: Date.now() - start,
+						failed: true,
 						// eslint-disable-next-line @typescript-eslint/no-base-to-string
 						'failed.error': String(ex),
 						'failed.error.detail': String(ex.original),
@@ -940,7 +984,7 @@ export class AIProviderService implements Disposable {
 
 				switch (ex.reason) {
 					case AIErrorReason.NoRequestData:
-						void window.showErrorMessage(ex.message);
+						void window.showInformationMessage(ex.message);
 						return undefined;
 
 					case AIErrorReason.NoEntitlement: {
@@ -1073,6 +1117,7 @@ export class AIProviderService implements Disposable {
 				{
 					...telementry.data,
 					duration: Date.now() - start,
+					failed: true,
 					'failed.error': String(ex),
 					'failed.error.detail': ex.original ? String(ex.original) : undefined,
 				},
@@ -1106,17 +1151,21 @@ export class AIProviderService implements Disposable {
 	}
 
 	private async getPrompt<T extends PromptTemplateType>(
-		template: T,
+		templateType: T,
 		model: AIModel,
 		context: PromptTemplateContext<T>,
 		maxInputTokens: number,
 		retries: number,
 		reporting: TelemetryEvents['ai/generate' | 'ai/explain'],
 	): Promise<{ prompt: string; truncated: boolean }> {
-		const promptTemplate = await this.getPromptTemplate(template, model);
+		const promptTemplate = await this.getPromptTemplate(templateType, model);
 		if (promptTemplate == null) {
 			debugger;
-			throw new Error(`No prompt template found for ${template}`);
+			throw new Error(`No prompt template found for ${templateType}`);
+		}
+
+		if ('instructions' in context && context.instructions) {
+			context.instructions = `Carefully follow these additional instructions (provided directly by the user), but do not deviate from the output structure:\n${context.instructions}`;
 		}
 
 		const result = await resolvePrompt(model, promptTemplate, context, maxInputTokens, retries, reporting);
@@ -1124,53 +1173,63 @@ export class AIProviderService implements Disposable {
 	}
 
 	private async getPromptTemplate<T extends PromptTemplateType>(
-		template: T,
+		templateType: T,
 		model: AIModel,
 	): Promise<PromptTemplate | undefined> {
-		if ((await this.container.subscription.getSubscription()).account) {
-			const scope = getLogScope();
+		const scope = getLogScope();
+
+		const template = getLocalPromptTemplate(templateType, model);
+		const templateId = template?.id ?? templateType;
+
+		return this._promptTemplates.get(templateId, async cancellable => {
+			if (!(await this.container.subscription.getSubscription()).account) {
+				return template;
+			}
 
 			try {
-				return await this._promptTemplates.get(template, async () => {
-					const url = this.container.urls.getGkAIApiUrl(`templates/message-prompt/${template}`);
-					const rsp = await fetch(url, {
-						headers: await this.connection.getGkHeaders(undefined, undefined, {
-							Accept: 'application/json',
-						}),
-					});
-					if (!rsp.ok) {
-						throw new Error(`Getting prompt template (${url}) failed: ${rsp.status} (${rsp.statusText})`);
-					}
-
-					interface PromptResponse {
-						data: {
-							id: string;
-							template: string;
-							variables: string[];
-						};
-						error?: null;
-					}
-
-					const result: PromptResponse = (await rsp.json()) as PromptResponse;
-					if (result.error != null) {
-						throw new Error(`Getting prompt template (${url}) failed: ${String(result.error)}`);
-					}
-
-					return {
-						id: result.data.id,
-						template: result.data.template,
-						variables: result.data.variables,
-					};
+				const url = this.container.urls.getGkAIApiUrl(`templates/message-prompt/${templateId}`);
+				const rsp = await fetch(url, {
+					headers: await this.connection.getGkHeaders(undefined, undefined, { Accept: 'application/json' }),
 				});
+				if (!rsp.ok) {
+					if (rsp.status === 404) {
+						Logger.warn(
+							scope,
+							`${rsp.status} (${rsp.statusText}): Failed to get prompt template '${templateId}' (${url})`,
+						);
+						return template;
+					}
+
+					if (rsp.status === 401) throw new AuthenticationRequiredError();
+					throw new Error(
+						`${rsp.status} (${rsp.statusText}): Failed to get prompt template '${templateId}' (${url})`,
+					);
+				}
+
+				interface PromptResponse {
+					data: { id: string; template: string; variables: string[] };
+					error?: null;
+				}
+
+				const result: PromptResponse = (await rsp.json()) as PromptResponse;
+				if (result.error != null) {
+					throw new Error(`Failed to get prompt template '${templateId}' (${url}). ${String(result.error)}`);
+				}
+
+				return {
+					id: result.data.id as PromptTemplateId<T>,
+					template: result.data.template,
+					variables: result.data.variables as (keyof PromptTemplateContext<T>)[],
+				} satisfies PromptTemplate<T>;
 			} catch (ex) {
+				cancellable.cancel();
 				if (!(ex instanceof AuthenticationRequiredError)) {
 					debugger;
-					Logger.error(ex, scope, `Unable to get prompt template for '${template}'`);
+					Logger.error(ex, scope, String(ex));
 				}
+				return template;
 			}
-		}
-
-		return getLocalPromptTemplate(template, model);
+		});
 	}
 
 	async reset(all?: boolean): Promise<void> {
@@ -1284,32 +1343,42 @@ async function showConfirmAIProviderToS(storage: Storage): Promise<boolean> {
 
 function parseSummarizeResult(result: string): NonNullable<AISummarizeResult['parsed']> {
 	result = result.trim();
-	let summary = result.match(/<summary>\s?([\s\S]*?)\s?(<\/summary>|$)/)?.[1]?.trim() ?? '';
-	let body = result.match(/<body>\s?([\s\S]*?)\s?(<\/body>|$)/)?.[1]?.trim() ?? '';
+	const summary = result.match(/<summary>([\s\S]*?)(?:<\/summary>|$)/)?.[1]?.trim() ?? undefined;
+	if (summary != null) {
+		result = result.replace(/<summary>[\s\S]*?(?:<\/summary>|$)/, '').trim();
+	}
+
+	let body = result.match(/<body>([\s\S]*?)(?:<\/body>|$)/)?.[1]?.trim() ?? undefined;
+	if (body != null) {
+		result = result.replace(/<body>[\s\S]*?(?:<\/body>|$)/, '').trim();
+	}
+
+	// Check for self-closing body tag
+	if (body == null && result.includes('<body/>')) {
+		body = '';
+	}
+
+	// If both tags are present, return them
+	if (summary != null && body != null) return { summary: summary, body: body };
 
 	// If both tags are missing, split the result
-	if (!summary && !body) {
-		return splitMessageIntoSummaryAndBody(result);
+	if (summary == null && body == null) return splitMessageIntoSummaryAndBody(result);
+
+	// If only summary tag is present, use any remaining text as the body
+	if (summary && body == null) {
+		return result ? { summary: summary, body: result } : splitMessageIntoSummaryAndBody(summary);
 	}
 
-	if (summary && !body) {
-		// If only summary tag is present, use the remaining text as the body
-		body = result.replace(/<summary>[\s\S]*?<\/summary>/, '')?.trim() ?? '';
-		if (!body) {
-			return splitMessageIntoSummaryAndBody(summary);
-		}
-	} else if (!summary && body) {
-		// If only body tag is present, use the remaining text as the summary
-		summary = result.replace(/<body>[\s\S]*?<\/body>/, '').trim() ?? '';
-		if (!summary) {
-			return splitMessageIntoSummaryAndBody(body);
-		}
+	// If only body tag is present, use the remaining text as the summary
+	if (summary == null && body) {
+		return result ? { summary: result, body: body } : splitMessageIntoSummaryAndBody(body);
 	}
 
-	return { summary: summary, body: body };
+	return { summary: summary ?? '', body: body ?? '' };
 }
 
 function splitMessageIntoSummaryAndBody(message: string): NonNullable<AISummarizeResult['parsed']> {
+	message = message.replace(/```([\s\S]*?)```/, '$1').trim();
 	const index = message.indexOf('\n');
 	if (index === -1) return { summary: message, body: '' };
 
@@ -1325,4 +1394,61 @@ function isPrimaryAIProvider(provider: AIProviders): provider is AIPrimaryProvid
 
 function isPrimaryAIProviderModel(model: AIModel): model is AIModel<AIPrimaryProviders, AIProviderAndModel> {
 	return isPrimaryAIProvider(model.provider.id);
+}
+
+export async function prepareCompareDataForAIRequest(
+	repo: Repository,
+	headRef: string,
+	baseRef: string,
+	options?: {
+		cancellation?: CancellationToken;
+		reportNoDiffService?: () => void;
+		reportNoCommitsService?: () => void;
+		reportNoChanges?: () => void;
+	},
+): Promise<{ diff: string; logMessages: string } | undefined> {
+	const { cancellation, reportNoDiffService, reportNoCommitsService, reportNoChanges } = options ?? {};
+	const diffService = repo.git.diff();
+	if (diffService?.getDiff === undefined) {
+		if (reportNoDiffService) {
+			reportNoDiffService();
+			return;
+		}
+	}
+
+	const commitsService = repo.git.commits();
+	if (commitsService?.getLog === undefined) {
+		if (reportNoCommitsService) {
+			reportNoCommitsService();
+			return;
+		}
+	}
+
+	const [diffResult, logResult] = await Promise.allSettled([
+		diffService.getDiff?.(headRef, baseRef, { notation: '...' }),
+		commitsService.getLog(`${baseRef}..${headRef}`),
+	]);
+	const diff = getSettledValue(diffResult);
+	const log = getSettledValue(logResult);
+
+	if (!diff?.contents || !log?.commits?.size) {
+		reportNoChanges?.();
+		return undefined;
+	}
+
+	if (cancellation?.isCancellationRequested) throw new CancellationError();
+
+	const commitMessages: string[] = [];
+	for (const commit of [...log.commits.values()].sort((a, b) => a.date.getTime() - b.date.getTime())) {
+		const message = commit.message ?? commit.summary;
+		if (message) {
+			commitMessages.push(
+				`<commit-message ${commit.date.toISOString()}>\n${
+					commit.message ?? commit.summary
+				}\n<end-of-commit-message>`,
+			);
+		}
+	}
+
+	return { diff: diff.contents, logMessages: commitMessages.join('\n\n') };
 }

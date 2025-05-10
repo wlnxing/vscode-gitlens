@@ -219,7 +219,7 @@ export class PatchDetailsWebviewProvider
 	registerCommands(): Disposable[] {
 		const commands: Disposable[] = [];
 
-		if (this.host.isHost('view')) {
+		if (this.host.is('view')) {
 			commands.push(
 				registerCommand(`${this.host.id}.refresh`, () => this.host.refresh(true)),
 				registerCommand(`${this.host.id}.close`, () => this.closeView()),
@@ -342,7 +342,12 @@ export class PatchDetailsWebviewProvider
 
 	private onAnyConfigurationChanged(e: ConfigurationChangeEvent) {
 		if (
-			configuration.changed(e, ['defaultDateFormat', 'views.patchDetails.files', 'views.patchDetails.avatars']) ||
+			configuration.changed(e, [
+				'defaultDateFormat',
+				'views.patchDetails.files',
+				'views.patchDetails.avatars',
+				'ai.enabled',
+			]) ||
 			configuration.changedCore(e, 'workbench.tree.renderIndentGuides') ||
 			configuration.changedCore(e, 'workbench.tree.indent')
 		) {
@@ -358,6 +363,7 @@ export class PatchDetailsWebviewProvider
 			files: configuration.get('views.patchDetails.files'),
 			indentGuides: configuration.getCore('workbench.tree.renderIndentGuides') ?? 'onHover',
 			indent: configuration.getCore('workbench.tree.indent'),
+			aiEnabled: configuration.get('ai.enabled'),
 		};
 	}
 

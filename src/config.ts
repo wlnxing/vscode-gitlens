@@ -151,6 +151,7 @@ export type StatusBarCommands =
 
 // NOTE: Must be kept in sync with `gitlens.advanced.messages` setting in the package.json
 export type SuppressedMessages =
+	| 'suppressBitbucketPRCommitLinksAppNotInstalledWarning'
 	| 'suppressCommitHasNoPreviousCommitWarning'
 	| 'suppressCommitNotFoundWarning'
 	| 'suppressCreatePullRequestPrompt'
@@ -209,6 +210,10 @@ export interface AdvancedConfig {
 }
 
 interface AIConfig {
+	readonly enabled: boolean;
+	readonly azure: {
+		readonly url: string | null;
+	};
 	readonly explainChanges: {
 		readonly customInstructions: string;
 	};
@@ -243,7 +248,13 @@ interface AIConfig {
 	readonly modelOptions: {
 		readonly temperature: number;
 	};
+	readonly ollama: {
+		readonly url: string | null;
+	};
 	readonly openai: {
+		readonly url: string | null;
+	};
+	readonly openaicompatible: {
 		readonly url: string | null;
 	};
 	readonly vscode: {
@@ -838,6 +849,7 @@ export interface CommitDetailsViewConfig {
 export interface ContributorsViewConfig {
 	readonly avatars: boolean;
 	readonly files: ViewsFilesConfig;
+	readonly maxWait: number;
 	readonly pullRequests: {
 		readonly enabled: boolean;
 		readonly showForCommits: boolean;

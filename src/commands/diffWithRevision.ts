@@ -1,6 +1,7 @@
 import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
 import { GlyphChars, quickPickTitleMaxChars } from '../constants';
 import type { Container } from '../container';
+import type { DiffRange } from '../git/gitProvider';
 import { GitUri } from '../git/gitUri';
 import { shortenRevision } from '../git/utils/revision.utils';
 import { showGenericErrorMessage } from '../messages';
@@ -10,6 +11,7 @@ import type { DirectiveQuickPickItem } from '../quickpicks/items/directive';
 import { createDirectiveQuickPickItem, Directive } from '../quickpicks/items/directive';
 import { command, executeCommand } from '../system/-webview/command';
 import { splitPath } from '../system/-webview/path';
+import { selectionToDiffRange } from '../system/-webview/vscode/editors';
 import { Logger } from '../system/logger';
 import { pad } from '../system/string';
 import { ActiveEditorCommand } from './commandBase';
@@ -18,7 +20,7 @@ import type { DiffWithCommandArgs } from './diffWith';
 import type { DiffWithRevisionFromCommandArgs } from './diffWithRevisionFrom';
 
 export interface DiffWithRevisionCommandArgs {
-	line?: number;
+	range?: DiffRange;
 	showOptions?: TextDocumentShowOptions;
 }
 
@@ -35,16 +37,18 @@ export class DiffWithRevisionCommand extends ActiveEditorCommand {
 		const gitUri = await GitUri.fromUri(uri);
 
 		args = { ...args };
-		if (args.line == null) {
-			args.line = editor?.selection.active.line ?? 0;
-		}
+		args.range ??= selectionToDiffRange(editor?.selection);
 
 		try {
 			const commitsProvider = this.container.git.commits(gitUri.repoPath!);
 			const log = commitsProvider
-				.getLogForPath(gitUri.fsPath)
+				.getLogForPath(gitUri.fsPath, undefined, { isFolder: false })
 				.then(
-					log => log ?? (gitUri.sha ? commitsProvider.getLogForPath(gitUri.fsPath, gitUri.sha) : undefined),
+					log =>
+						log ??
+						(gitUri.sha
+							? commitsProvider.getLogForPath(gitUri.fsPath, gitUri.sha, { isFolder: false })
+							: undefined),
 				);
 
 			const title = `Open Changes with Revision${pad(GlyphChars.Dot, 2, 2)}`;
@@ -111,15 +115,9 @@ export class DiffWithRevisionCommand extends ActiveEditorCommand {
 					onDidPressKey: async (_key, item) => {
 						await executeCommand<DiffWithCommandArgs>('gitlens.diffWith', {
 							repoPath: gitUri.repoPath,
-							lhs: {
-								sha: item.item.ref,
-								uri: gitUri,
-							},
-							rhs: {
-								sha: '',
-								uri: gitUri,
-							},
-							line: args.line,
+							lhs: { sha: item.item.ref, uri: gitUri },
+							rhs: { sha: '', uri: gitUri },
+							range: args.range,
 							showOptions: args.showOptions,
 						});
 					},
@@ -141,15 +139,9 @@ export class DiffWithRevisionCommand extends ActiveEditorCommand {
 
 			void (await executeCommand<DiffWithCommandArgs>('gitlens.diffWith', {
 				repoPath: gitUri.repoPath,
-				lhs: {
-					sha: pick.ref,
-					uri: gitUri,
-				},
-				rhs: {
-					sha: '',
-					uri: gitUri,
-				},
-				line: args.line,
+				lhs: { sha: pick.ref, uri: gitUri },
+				rhs: { sha: '', uri: gitUri },
+				range: args.range,
 				showOptions: args.showOptions,
 			}));
 		} catch (ex) {

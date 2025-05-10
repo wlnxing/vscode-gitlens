@@ -22,7 +22,7 @@ import { GlyphChars } from '../../../constants';
 import type { StoredGraphFilters, StoredGraphRefType } from '../../../constants.storage';
 import type { GraphShownTelemetryContext, GraphTelemetryContext, TelemetryEvents } from '../../../constants.telemetry';
 import type { Container } from '../../../container';
-import { CancellationError } from '../../../errors';
+import { CancellationError, isCancellationError } from '../../../errors';
 import type { CommitSelectedEvent } from '../../../eventBus';
 import type { FeaturePreview } from '../../../features';
 import { getFeaturePreviewStatus } from '../../../features';
@@ -113,12 +113,11 @@ import { isDarkTheme, isLightTheme } from '../../../system/-webview/vscode';
 import { openUrl } from '../../../system/-webview/vscode/uris';
 import type { OpenWorkspaceLocation } from '../../../system/-webview/vscode/workspaces';
 import { openWorkspace } from '../../../system/-webview/vscode/workspaces';
-import { gate } from '../../../system/decorators/-webview/gate';
 import { debug, log } from '../../../system/decorators/log';
 import { disposableInterval } from '../../../system/function';
 import type { Deferrable } from '../../../system/function/debounce';
 import { debounce } from '../../../system/function/debounce';
-import { count, find, last, map } from '../../../system/iterable';
+import { count, find, join, last, map } from '../../../system/iterable';
 import { flatten, updateRecordValue } from '../../../system/object';
 import {
 	getSettledValue,
@@ -247,7 +246,7 @@ const compactGraphColumnsSettings: GraphColumnsSettings = {
 	sha: { width: 130, isHidden: false, order: 6 },
 };
 
-type CancellableOperations = 'hover' | 'computeIncludedRefs' | 'search' | 'state';
+type CancellableOperations = 'branchState' | 'hover' | 'computeIncludedRefs' | 'search' | 'state';
 
 export class GraphWebviewProvider implements WebviewProvider<State, State, GraphWebviewShowingArgs> {
 	private _repository?: Repository;
@@ -479,7 +478,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	registerCommands(): Disposable[] {
 		const commands: Disposable[] = [];
 
-		if (this.host.isHost('view')) {
+		if (this.host.is('view')) {
 			commands.push(
 				registerCommand(`${this.host.id}.refresh`, () => this.host.refresh(true)),
 				registerCommand(
@@ -686,6 +685,10 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				this.copyWorkingChangesToWorktree,
 			),
 			this.host.registerWebviewCommand('gitlens.graph.ai.generateCommitMessage', this.generateCommitMessage),
+			this.host.registerWebviewCommand('gitlens.graph.ai.explainBranch', this.explainBranch),
+			this.host.registerWebviewCommand('gitlens.graph.ai.explainCommit', this.explainCommit),
+			this.host.registerWebviewCommand('gitlens.graph.ai.explainStash', this.explainStash),
+			this.host.registerWebviewCommand('gitlens.graph.ai.explainWip', this.explainWip),
 
 			this.host.registerWebviewCommand('gitlens.graph.compareSelectedCommits.multi', this.compareSelectedCommits),
 			this.host.registerWebviewCommand('gitlens.graph.abortPausedOperation', this.abortPausedOperation),
@@ -1073,7 +1076,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 					},
 				);
 
-				const details = this.host.isHost('editor')
+				const details = this.host.is('editor')
 					? this.container.views.commitDetails
 					: this.container.views.graphDetails;
 				if (!details.ready) {
@@ -1106,20 +1109,30 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 				let cache = true;
 				let commit;
-				switch (msg.params.type) {
-					case 'work-dir-changes':
-						cache = false;
-						commit = await this.container.git.commits(this._graph.repoPath).getCommit(uncommitted);
-						break;
-					case 'stash-node': {
-						const gitStash = await this.container.git.stash(this._graph.repoPath)?.getStash();
-						commit = gitStash?.stashes.get(msg.params.id);
-						break;
+				try {
+					switch (msg.params.type) {
+						case 'work-dir-changes':
+							cache = false;
+							commit = await this.container.git
+								.commits(this._graph.repoPath)
+								.getCommit(uncommitted, cancellation.token);
+							break;
+						case 'stash-node': {
+							const gitStash = await this.container.git
+								.stash(this._graph.repoPath)
+								?.getStash(undefined, cancellation.token);
+							commit = gitStash?.stashes.get(msg.params.id);
+							break;
+						}
+						default: {
+							commit = await this.container.git
+								.commits(this._graph.repoPath)
+								.getCommit(msg.params.id, cancellation.token);
+							break;
+						}
 					}
-					default: {
-						commit = await this.container.git.commits(this._graph.repoPath).getCommit(msg.params.id);
-						break;
-					}
+				} catch (ex) {
+					if (!(ex instanceof CancellationError)) throw ex;
 				}
 
 				if (commit != null && !cancellation.token.isCancellationRequested) {
@@ -1461,7 +1474,6 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		this.updateRefsMetadata();
 	}
 
-	@gate()
 	@debug()
 	private async onGetMoreRows(e: GetMoreRowsParams, sendSelectedRows: boolean = false) {
 		if (this._graph?.paging == null) return;
@@ -1471,13 +1483,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			return;
 		}
 
-		using sw = new Stopwatch(`GraohWebviewProvider.onGetMoreRows(${this.host.id})`);
 		await this.updateGraphWithMoreRows(this._graph, e.id, this._search);
-		this.container.telemetry.sendEvent('graph/rows/loaded', {
-			...this.getTelemetryContext(),
-			duration: sw.elapsed(),
-			rows: this._graph.rows.length ?? 0,
-		});
 		void this.notifyDidChangeRows(sendSelectedRows);
 	}
 
@@ -1498,29 +1504,38 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 
 	@debug()
 	private async onSearchRequest<T extends typeof SearchRequest>(requestType: T, msg: IpcCallMessageType<T>) {
+		using sw = new Stopwatch(`GraphWebviewProvider.onSearchRequest(${this.host.id})`);
+
+		const query = msg.params.search ? parseSearchQuery(msg.params.search) : undefined;
+		const types = query != null ? join(query?.keys(), ',') : '';
+
+		let results;
+		let exception: (Error & { original?: Error }) | undefined;
+
 		try {
-			using sw = new Stopwatch(`GraphWebviewProvider.onSearchRequest(${this.host.id})`);
-			const results = await this.getSearchResults(msg.params);
-			const query = msg.params.search ? parseSearchQuery(msg.params.search) : undefined;
-			const types = new Set<string>();
-			if (query != null) {
-				for (const [_, values] of query) {
-					values.forEach(v => types.add(v));
-				}
-			}
-			this.container.telemetry.sendEvent('graph/searched', {
-				...this.getTelemetryContext(),
-				types: [...types].join(','),
-				duration: sw.elapsed(),
-				matches: (results.results as GraphSearchResults)?.count ?? 0,
-			});
+			results = await this.getSearchResults(msg.params);
+
 			void this.host.respond(requestType, msg, results);
 		} catch (ex) {
+			exception = ex;
 			void this.host.respond(requestType, msg, {
-				results:
-					ex instanceof CancellationError
-						? undefined
-						: { error: ex instanceof GitSearchError ? 'Invalid search pattern' : 'Unexpected error' },
+				results: isCancellationError(ex)
+					? undefined
+					: { error: ex instanceof GitSearchError ? 'Invalid search pattern' : 'Unexpected error' },
+			});
+		} finally {
+			const cancelled = isCancellationError(exception);
+
+			this.container.telemetry.sendEvent('graph/searched', {
+				...this.getTelemetryContext(),
+				types: types,
+				duration: sw.elapsed(),
+				matches: (results?.results as GraphSearchResults)?.count ?? 0,
+				failed: exception != null,
+				'failed.reason': exception != null ? (cancelled ? 'cancelled' : 'error') : undefined,
+				'failed.error': !cancelled && exception != null ? String(exception) : undefined,
+				'failed.error.detail':
+					!cancelled && exception?.original != null ? String(exception?.original) : undefined,
 			});
 		}
 	}
@@ -1566,25 +1581,20 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 			const cancellation = this.createCancellation('search');
 
 			try {
-				search = await this.repository.git.graph().searchGraph(e.search, {
-					limit: configuration.get('graph.searchItemLimit') ?? 100,
-					ordering: configuration.get('graph.commitOrdering'),
-					cancellation: cancellation.token,
-				});
+				search = await this.repository.git.graph().searchGraph(
+					e.search,
+					{
+						limit: configuration.get('graph.searchItemLimit') ?? 100,
+						ordering: configuration.get('graph.commitOrdering'),
+					},
+					cancellation.token,
+				);
 			} catch (ex) {
 				this._search = undefined;
 				throw ex;
-				// return {
-				// 	results: {
-				// 		error: ex instanceof GitSearchError ? 'Invalid search pattern' : 'Unexpected error',
-				// 	},
-				// };
 			}
 
-			if (cancellation.token.isCancellationRequested) {
-				throw new CancellationError();
-				// return { results: undefined };
-			}
+			if (cancellation.token.isCancellationRequested) throw new CancellationError();
 
 			this._search = search;
 		} else {
@@ -1600,16 +1610,15 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 
 		return {
-			results:
-				search.results.size === 0
-					? { count: 0 }
-					: {
-							ids: Object.fromEntries(
-								map(search.results, ([k, v]) => [this._graph?.remappedIds?.get(k) ?? k, v]),
-							),
-							count: search.results.size,
-							paging: { hasMore: search.paging?.hasMore ?? false },
-					  },
+			results: !search.results.size
+				? { count: 0 }
+				: {
+						ids: Object.fromEntries(
+							map(search.results, ([k, v]) => [this._graph?.remappedIds?.get(k) ?? k, v]),
+						),
+						count: search.results.size,
+						paging: { hasMore: search.paging?.hasMore ?? false },
+				  },
 			selectedRows: sendSelectedRows ? this._selectedRows : undefined,
 		};
 	}
@@ -1690,10 +1699,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const item = e.selection[0];
 		this.setSelectedRows(item?.id);
 
-		if (this._fireSelectionChangedDebounced == null) {
-			this._fireSelectionChangedDebounced = debounce(this.fireSelectionChanged.bind(this), 50);
-		}
-
+		this._fireSelectionChangedDebounced ??= debounce(this.fireSelectionChanged.bind(this), 50);
 		this._fireSelectionChangedDebounced(item?.id, item?.type);
 	}
 
@@ -1706,7 +1712,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		this._selection = commits;
 
 		if (commits == null) return;
-		if (!this._firstSelection && this.host.isHost('editor') && !this.host.active) return;
+		if (!this._firstSelection && this.host.is('editor') && !this.host.active) return;
 
 		this.container.events.fire(
 			'commit:selected',
@@ -2194,13 +2200,17 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				const cancellation = this.createCancellation('computeIncludedRefs');
 
 				const [baseResult, defaultResult, targetResult] = await Promise.allSettled([
-					this.container.git.branches(current.repoPath).getBaseBranchName?.(current.name),
-					getDefaultBranchName(this.container, current.repoPath, current.getRemoteName()),
+					this.container.git.branches(current.repoPath).getBaseBranchName?.(current.name, cancellation.token),
+					getDefaultBranchName(this.container, current.repoPath, current.getRemoteName(), {
+						cancellation: cancellation.token,
+					}),
 					getTargetBranchName(this.container, current, {
 						cancellation: cancellation.token,
 						timeout: options?.timeout,
 					}),
 				]);
+
+				if (cancellation.token.isCancellationRequested) return { refs: {} };
 
 				const baseBranchName = getSettledValue(baseResult);
 				const defaultBranchName = getSettledValue(defaultResult);
@@ -2460,13 +2470,13 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		return item;
 	}
 
-	private async getWorkingTreeStats(): Promise<GraphWorkingTreeStats | undefined> {
+	private async getWorkingTreeStats(cancellation?: CancellationToken): Promise<GraphWorkingTreeStats | undefined> {
 		if (this.repository == null || this.container.git.repositoryCount === 0) return undefined;
 
-		const statusProivder = this.container.git.status(this.repository.path);
-		const status = await statusProivder.getStatus();
+		const statusProvider = this.container.git.status(this.repository.path);
+		const status = await statusProvider.getStatus(cancellation);
 		const workingTreeStatus = status?.getDiffStatus();
-		const pausedOpStatus = await statusProivder.getPausedOperationStatus?.();
+		const pausedOpStatus = await statusProvider.getPausedOperationStatus?.(cancellation);
 
 		return {
 			added: workingTreeStatus?.added ?? 0,
@@ -2485,6 +2495,9 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 	}
 
 	private async getState(deferRows?: boolean): Promise<State> {
+		this.cancelOperation('branchState');
+		this.cancelOperation('state');
+
 		if (this.container.git.repositoryCount === 0) {
 			return { ...this.host.baseWebviewState, allowed: true, repositories: [] };
 		}
@@ -2495,6 +2508,8 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				return { ...this.host.baseWebviewState, allowed: true, repositories: [] };
 			}
 		}
+
+		const cancellation = this.createCancellation('state');
 
 		this._etagRepository = this.repository?.etag;
 		this.host.title = `${this.host.originalTitle}: ${this.repository.formattedName}`;
@@ -2510,35 +2525,42 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const columns = this.getColumns();
 		const columnSettings = this.getColumnSettings(columns);
 
-		const dataPromise = this.repository.git.graph().getGraph(rev, uri => this.host.asWebviewUri(uri), {
-			include: {
-				stats:
-					(configuration.get('graph.minimap.enabled') &&
-						configuration.get('graph.minimap.dataType') === 'lines') ||
-					!columnSettings.changes.isHidden,
+		const dataPromise = this.repository.git.graph().getGraph(
+			rev,
+			uri => this.host.asWebviewUri(uri),
+			{
+				include: {
+					stats:
+						(configuration.get('graph.minimap.enabled') &&
+							configuration.get('graph.minimap.dataType') === 'lines') ||
+						!columnSettings.changes.isHidden,
+				},
+				limit: limit,
 			},
-			limit: limit,
-		});
+			cancellation.token,
+		);
 
 		// Check for access and working tree stats
 		const promises = Promise.allSettled([
 			this.getGraphAccess(),
-			this.getWorkingTreeStats(),
-			this.repository.git.branches().getBranch(),
+			this.getWorkingTreeStats(cancellation.token),
+			this.repository.git.branches().getBranch(undefined, cancellation.token),
 			this.repository.getLastFetched(),
 		]);
 
 		let data;
 		if (deferRows) {
 			queueMicrotask(async () => {
-				const data = await dataPromise;
-				this.setGraph(data);
-				if (selectedId !== uncommitted) {
-					this.setSelectedRows(data.id);
-				}
+				try {
+					const data = await dataPromise;
+					this.setGraph(data);
+					if (selectedId !== uncommitted) {
+						this.setSelectedRows(data.id);
+					}
 
-				void this.notifyDidChangeRefsVisibility();
-				void this.notifyDidChangeRows(true);
+					void this.notifyDidChangeRefsVisibility();
+					void this.notifyDidChangeRows(true);
+				} catch {}
 			});
 		} else {
 			data = await dataPromise;
@@ -2549,6 +2571,8 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 
 		const [accessResult, workingStatsResult, branchResult, lastFetchedResult] = await promises;
+		if (cancellation.token.isCancellationRequested) throw new CancellationError();
+
 		const [access, visibility] = getSettledValue(accessResult) ?? [];
 
 		let branchState: BranchState | undefined;
@@ -2557,17 +2581,18 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		if (branch != null) {
 			branchState = { ...(branch.upstream?.state ?? { ahead: 0, behind: 0 }) };
 
-			const worktreesByBranch = data?.worktreesByBranch ?? (await getWorktreesByBranch(this.repository));
+			const worktreesByBranch =
+				data?.worktreesByBranch ?? (await getWorktreesByBranch(this.repository, undefined, cancellation.token));
 			branchState.worktree = worktreesByBranch?.has(branch.id) ?? false;
 
 			if (branch.upstream != null) {
 				branchState.upstream = branch.upstream.name;
 
-				const cancellation = this.createCancellation('state');
+				const branchStateCancellation = this.createCancellation('branchState');
 
 				const [remoteResult, prResult] = await Promise.allSettled([
 					branch.getRemote(),
-					pauseOnCancelOrTimeout(branch.getAssociatedPullRequest(), cancellation.token, 100),
+					pauseOnCancelOrTimeout(branch.getAssociatedPullRequest(), branchStateCancellation.token, 100),
 				]);
 
 				const remote = getSettledValue(remoteResult);
@@ -2583,7 +2608,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 				if (maybePr?.paused) {
 					const updatedBranchState = { ...branchState };
 					void maybePr.value.then(pr => {
-						if (cancellation?.token.isCancellationRequested) return;
+						if (branchStateCancellation?.token.isCancellationRequested) return;
 
 						if (pr != null) {
 							updatedBranchState.pr = serializePullRequest(pr);
@@ -3037,9 +3062,68 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		}
 	}
 
+	private _pendingRowsQuery:
+		| {
+				promise: Promise<void>;
+				cancellable: CancellationTokenSource;
+				id?: string | undefined;
+				search?: GitGraphSearch;
+		  }
+		| undefined;
 	private async updateGraphWithMoreRows(graph: GitGraph, id: string | undefined, search?: GitGraphSearch) {
+		if (this._pendingRowsQuery != null) {
+			const { id: pendingId, search: pendingSearch } = this._pendingRowsQuery;
+			if (pendingSearch === search && (pendingId === id || (pendingId != null && id == null))) {
+				return this._pendingRowsQuery.promise;
+			}
+
+			this._pendingRowsQuery.cancellable.cancel();
+			this._pendingRowsQuery.cancellable.dispose();
+			this._pendingRowsQuery = undefined;
+		}
+
+		const sw = new Stopwatch(undefined);
+
+		const cancellable = new CancellationTokenSource();
+		const cancellation = cancellable.token;
+
+		this._pendingRowsQuery = {
+			promise: this.updateGraphWithMoreRowsCore(graph, id, search, cancellation).catch((ex: unknown) => {
+				if (cancellation.isCancellationRequested) return;
+
+				throw ex;
+			}),
+			cancellable: cancellable,
+			id: id,
+			search: search,
+		};
+
+		void this._pendingRowsQuery.promise.finally(() => {
+			if (cancellation.isCancellationRequested) return;
+
+			this.container.telemetry.sendEvent('graph/rows/loaded', {
+				...this.getTelemetryContext(),
+				duration: sw.elapsed(),
+				rows: graph.rows.length ?? 0,
+			});
+			sw.stop();
+
+			this._pendingRowsQuery = undefined;
+		});
+
+		return this._pendingRowsQuery.promise;
+	}
+
+	private async updateGraphWithMoreRowsCore(
+		graph: GitGraph,
+		id: string | undefined,
+		search?: GitGraphSearch,
+		cancellation?: CancellationToken,
+	) {
+		console.warn('##### updateGraphWithMoreRows', id, search);
+
 		const { defaultItemLimit, pageItemLimit } = configuration.get('graph');
-		const updatedGraph = await graph.more?.(pageItemLimit ?? defaultItemLimit, id);
+		const updatedGraph = await graph.more?.(pageItemLimit ?? defaultItemLimit, id ?? undefined, cancellation);
 		if (updatedGraph != null) {
 			this.setGraph(updatedGraph);
 
@@ -3269,7 +3353,7 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		const ref = this.getGraphItemRef(item, 'revision');
 		if (ref == null) return Promise.resolve();
 
-		if (this.host.isHost('view')) {
+		if (this.host.is('view')) {
 			return void showGraphDetailsView(ref, { preserveFocus: true, preserveVisibility: false });
 		}
 
@@ -3799,6 +3883,52 @@ export class GraphWebviewProvider implements WebviewProvider<State, State, Graph
 		return executeCommand<GenerateCommitMessageCommandArgs>('gitlens.graph.ai.generateCommitMessage', {
 			repoPath: ref.repoPath,
 			source: 'graph',
+		});
+	}
+
+	@log()
+	private explainBranch(item?: GraphItemContext) {
+		const ref = this.getGraphItemRef(item, 'branch');
+		if (ref == null) return Promise.resolve();
+
+		return executeCommand('gitlens.ai.explainBranch', {
+			repoPath: ref.repoPath,
+			ref: ref.ref,
+			source: { source: 'graph', type: 'branch' },
+		});
+	}
+	@log()
+	private explainCommit(item?: GraphItemContext) {
+		const ref = this.getGraphItemRef(item, 'revision');
+		if (ref == null) return Promise.resolve();
+
+		return executeCommand('gitlens.ai.explainCommit', {
+			repoPath: ref.repoPath,
+			ref: ref.ref,
+			source: { source: 'graph', type: 'commit' },
+		});
+	}
+
+	@log()
+	private explainStash(item?: GraphItemContext) {
+		const ref = this.getGraphItemRef(item, 'stash');
+		if (ref == null) return Promise.resolve();
+
+		return executeCommand('gitlens.ai.explainStash', {
+			repoPath: ref.repoPath,
+			ref: ref.ref,
+			source: { source: 'graph', type: 'stash' },
+		});
+	}
+
+	@log()
+	private explainWip(item?: GraphItemContext) {
+		const ref = this.getGraphItemRef(item, 'revision');
+		if (ref == null) return Promise.resolve();
+
+		return executeCommand('gitlens.ai.explainWip', {
+			repoPath: ref.repoPath,
+			source: { source: 'graph', type: 'wip' },
 		});
 	}
 

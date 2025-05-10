@@ -8,6 +8,14 @@ const hasSchemeRegex = /^([a-zA-Z][\w+.-]+):/;
 const pathNormalizeRegex = /\\/g;
 const slash = 47;
 
+export function arePathsEqual(a: string, b: string, ignoreCase?: boolean): boolean {
+	if (ignoreCase || (ignoreCase == null && !isLinux)) {
+		a = a.toLowerCase();
+		b = b.toLowerCase();
+	}
+	return normalizePath(a) === normalizePath(b);
+}
+
 export function commonBase(s: string[], delimiter: string, ignoreCase?: boolean): string | undefined {
 	if (s.length === 0) return undefined;
 
@@ -78,10 +86,6 @@ export function normalizePath(path: string): string {
 	return path;
 }
 
-export function pathEquals(a: string, b: string, ignoreCase?: boolean): boolean {
-	if (ignoreCase || (ignoreCase == null && !isLinux)) {
-		a = a.toLowerCase();
-		b = b.toLowerCase();
-	}
-	return normalizePath(a) === normalizePath(b);
+export function stripFolderGlob(path: string): string {
+	return isFolderGlob(path) ? path.slice(0, -2) : path;
 }

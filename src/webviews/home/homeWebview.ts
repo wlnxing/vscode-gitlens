@@ -4,6 +4,8 @@ import { ActionRunnerType } from '../../api/actionRunners';
 import type { CreatePullRequestActionContext } from '../../api/gitlens';
 import type { EnrichedAutolink } from '../../autolinks/models/autolinks';
 import { getAvatarUriFromGravatarEmail } from '../../avatars';
+import type { ChangeBranchMergeTargetCommandArgs } from '../../commands/changeBranchMergeTarget';
+import type { ExplainWipCommandArgs } from '../../commands/explainWip';
 import type { BranchGitCommandArgs } from '../../commands/git/branch';
 import type { OpenPullRequestOnRemoteCommandArgs } from '../../commands/openPullRequestOnRemote';
 import { GlyphChars, urls } from '../../constants';
@@ -118,11 +120,7 @@ import {
 } from './protocol';
 import type { HomeWebviewShowingArgs } from './registration';
 
-const emptyDisposable = Object.freeze({
-	dispose: () => {
-		/* noop */
-	},
-});
+const emptyDisposable: Disposable = Object.freeze({ dispose: () => {} });
 
 interface RepositoryBranchData {
 	repo: Repository;
@@ -266,7 +264,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 	}
 
 	private onDidChangeConfig(e?: ConfigurationChangeEvent) {
-		if (configuration.changed(e, 'home.preview.enabled')) {
+		if (configuration.changed(e, ['home.preview.enabled', 'ai.enabled'])) {
 			this.notifyDidChangeConfig();
 		}
 	}
@@ -333,6 +331,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 				(src?: Source) => this.container.subscription.validate({ force: true }, src),
 				this,
 			),
+			registerCommand('gitlens.home.changeBranchMergeTarget', this.changeBranchMergeTarget, this),
 			registerCommand('gitlens.home.deleteBranchOrWorktree', this.deleteBranchOrWorktree, this),
 			registerCommand('gitlens.home.pushBranch', this.pushBranch, this),
 			registerCommand('gitlens.home.openMergeTargetComparison', this.mergeTargetCompare, this),
@@ -354,6 +353,8 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			registerCommand('gitlens.home.continuePausedOperation', this.continuePausedOperation, this),
 			registerCommand('gitlens.home.abortPausedOperation', this.abortPausedOperation, this),
 			registerCommand('gitlens.home.openRebaseEditor', this.openRebaseEditor, this),
+			registerCommand('gitlens.home.explainWip', this.explainWip, this),
+			registerCommand('gitlens.home.ai.explainBranch', this.explainWip, this),
 		];
 	}
 
@@ -490,6 +491,19 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		});
 	}
 
+	@log<HomeWebviewProvider['changeBranchMergeTarget']>()
+	private changeBranchMergeTarget(ref: BranchAndTargetRefs) {
+		this.container.telemetry.sendEvent('home/changeBranchMergeTarget');
+		void executeCommand<ChangeBranchMergeTargetCommandArgs>('gitlens.changeBranchMergeTarget', {
+			command: 'changeBranchMergeTarget',
+			state: {
+				repo: ref.repoPath,
+				branch: ref.branchName,
+				mergeBranch: ref.mergeTargetName,
+			},
+		});
+	}
+
 	@log<HomeWebviewProvider['mergeIntoCurrent']>({ args: { 0: r => r.branchId } })
 	private async mergeIntoCurrent(ref: BranchRef) {
 		const { repo, branch } = await this.getRepoInfoFromRef(ref);
@@ -504,6 +518,20 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		if (branch == null) return;
 
 		void RepoActions.rebase(repo, getReferenceFromBranch(branch));
+	}
+
+	@log<HomeWebviewProvider['explainWip']>({ args: { 0: r => r.branchId } })
+	private async explainWip(ref: BranchRef) {
+		const { repo, branch } = await this.getRepoInfoFromRef(ref);
+		if (repo == null) return;
+
+		const worktree = await branch?.getWorktree();
+
+		void executeCommand<ExplainWipCommandArgs>('gitlens.ai.explainWip', {
+			repoPath: repo.path,
+			worktreePath: worktree?.path,
+			source: { source: 'home', detail: 'wip' },
+		});
 	}
 
 	@log()
@@ -643,6 +671,10 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		return this.container.storage.get('home:sections:collapsed')?.includes('newHomePreview') ?? false;
 	}
 
+	private getAiEnabled() {
+		return configuration.get('ai.enabled');
+	}
+
 	private getAmaBannerCollapsed() {
 		if (Date.now() >= new Date('2025-02-13T13:00:00-05:00').getTime()) return true;
 
@@ -701,6 +733,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 			avatar: subResult.value.avatar,
 			organizationsCount: subResult.value.organizationsCount,
 			orgSettings: this.getOrgSettings(),
+			aiEnabled: this.getAiEnabled(),
 			previewCollapsed: this.getPreviewCollapsed(),
 			integrationBannerCollapsed: this.getIntegrationBannerCollapsed(),
 			integrations: integrations,
@@ -1128,6 +1161,7 @@ export class HomeWebviewProvider implements WebviewProvider<State, State, HomeWe
 		void this.host.notify(DidChangePreviewEnabled, {
 			previewEnabled: this.getPreviewEnabled(),
 			previewCollapsed: this.getPreviewCollapsed(),
+			aiEnabled: this.getAiEnabled(),
 		});
 	}
 
@@ -1664,7 +1698,7 @@ async function getContributorsInfo(
 					email: c.email ?? '',
 					current: c.current,
 					timestamp: c.latestCommitDate?.getTime(),
-					count: c.commits,
+					count: c.contributionCount,
 					stats: c.stats,
 					avatarUrl: (await c.getAvatarUri())?.toString(),
 				}) satisfies NonNullable<ContributorsInfo>[0],
@@ -1682,7 +1716,9 @@ async function getBranchMergeTargetStatusInfo(
 	});
 
 	let targetResult;
-	if (!info.targetBranch.paused && info.targetBranch.value) {
+	if (info.userTargetBranch) {
+		targetResult = info.userTargetBranch;
+	} else if (!info.targetBranch.paused && info.targetBranch.value) {
 		targetResult = info.targetBranch.value;
 	}
 

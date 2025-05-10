@@ -49,6 +49,7 @@ export const enum CharCode {
 
 export type GitConfigKeys =
 	| `branch.${string}.${'gk' | 'vscode'}-merge-base`
+	| `branch.${string}.gk-user-merge-target`
 	| `branch.${string}.gk-target-base`
 	| `branch.${string}.gk-associated-issues`
 	| `branch.${string}.github-pr-owner-number`;
@@ -182,6 +183,7 @@ export const urls = Object.freeze({
 	interactiveCodeHistory: `https://help.gitkraken.com/gitlens/gitlens-start-here/?${utm}#interactive-code-history`,
 	startIntegrations: `https://help.gitkraken.com/gitlens/gitlens-start-here/?${utm}#improve-workflows-with-integrations`,
 	streamlineCollaboration: `https://help.gitkraken.com/gitlens/gitlens-start-here/?${utm}#streamline-collaboration`,
+	aiFeatures: `https://help.gitkraken.com/gitlens/gl-gk-ai/?${utm}`,
 });
 
 export type WalkthroughSteps =

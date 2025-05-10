@@ -1,21 +1,22 @@
-import type { Range, TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
+import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
 import type { Container } from '../container';
+import type { DiffRange } from '../git/gitProvider';
 import { GitUri } from '../git/gitUri';
 import type { GitCommit } from '../git/models/commit';
 import { showGenericErrorMessage } from '../messages';
 import { command, executeCommand } from '../system/-webview/command';
+import { selectionToDiffRange } from '../system/-webview/vscode/editors';
 import { getTabUris, getVisibleTabs } from '../system/-webview/vscode/tabs';
 import { Logger } from '../system/logger';
-import { uriEquals } from '../system/uri';
+import { areUrisEqual } from '../system/uri';
 import { ActiveEditorCommand } from './commandBase';
 import { getCommandUri } from './commandBase.utils';
 import type { DiffWithCommandArgs } from './diffWith';
 
 export interface DiffWithNextCommandArgs {
 	commit?: GitCommit;
-	range?: Range;
 
-	line?: number;
+	range?: DiffRange;
 	showOptions?: TextDocumentShowOptions;
 }
 
@@ -30,9 +31,7 @@ export class DiffWithNextCommand extends ActiveEditorCommand {
 		if (uri == null) return;
 
 		args = { ...args };
-		if (args.line == null) {
-			args.line = editor?.selection.active.line ?? 0;
-		}
+		args.range ??= selectionToDiffRange(editor?.selection);
 
 		let isInLeftSideOfDiffEditor = false;
 
@@ -42,7 +41,7 @@ export class DiffWithNextCommand extends ActiveEditorCommand {
 			if (tab != null) {
 				const uris = getTabUris(tab);
 				// If there is an original, then we are in a diff editor -- modified is right, original is left
-				if (uris.original != null && uriEquals(uri, uris.original)) {
+				if (uris.original != null && areUrisEqual(uri, uris.original)) {
 					isInLeftSideOfDiffEditor = true;
 				}
 			}
@@ -61,15 +60,9 @@ export class DiffWithNextCommand extends ActiveEditorCommand {
 
 			void (await executeCommand<DiffWithCommandArgs>('gitlens.diffWith', {
 				repoPath: diffUris.current.repoPath,
-				lhs: {
-					sha: diffUris.current.sha ?? '',
-					uri: diffUris.current.documentUri(),
-				},
-				rhs: {
-					sha: diffUris.next.sha ?? '',
-					uri: diffUris.next.documentUri(),
-				},
-				line: args.line,
+				lhs: { sha: diffUris.current.sha ?? '', uri: diffUris.current.documentUri() },
+				rhs: { sha: diffUris.next.sha ?? '', uri: diffUris.next.documentUri() },
+				range: args.range,
 				showOptions: args.showOptions,
 			}));
 		} catch (ex) {

@@ -68,9 +68,9 @@ import { first, join } from '../../../system/iterable';
 import { Logger } from '../../../system/logger';
 import type { LogScope } from '../../../system/logger.scope';
 import { getLogScope, setLogScopeExit } from '../../../system/logger.scope';
-import { commonBaseIndex, dirname, isAbsolute, maybeUri, normalizePath, pathEquals } from '../../../system/path';
+import { arePathsEqual, commonBaseIndex, dirname, isAbsolute, maybeUri, normalizePath } from '../../../system/path';
 import { any, asSettled, getSettledValue } from '../../../system/promise';
-import { equalsIgnoreCase, getDurationMilliseconds, splitSingle } from '../../../system/string';
+import { equalsIgnoreCase, getDurationMilliseconds } from '../../../system/string';
 import { compare, fromString } from '../../../system/version';
 import type { CachedBlame, CachedDiff, TrackedGitDocument } from '../../../trackers/trackedDocument';
 import { GitDocumentState } from '../../../trackers/trackedDocument';
@@ -786,12 +786,12 @@ export class LocalGitProvider implements GitProvider, Disposable {
 		// TODO@eamodio Align this with isTrackedCore?
 		if (!rev || (isUncommitted(rev) && !isUncommittedStaged(rev))) {
 			// Make sure the file exists in the repo
-			let data = await this.git.ls_files(repoPath, path);
-			if (data != null) return this.getAbsoluteUri(path, repoPath);
+			let exists = await this.revision.exists(repoPath, path);
+			if (exists) return this.getAbsoluteUri(path, repoPath);
 
 			// Check if the file exists untracked
-			data = await this.git.ls_files(repoPath, path, { untracked: true });
-			if (data != null) return this.getAbsoluteUri(path, repoPath);
+			exists = await this.revision.exists(repoPath, path, { untracked: true });
+			if (exists) return this.getAbsoluteUri(path, repoPath);
 
 			return undefined;
 		}
@@ -890,15 +890,10 @@ export class LocalGitProvider implements GitProvider, Disposable {
 	async getWorkingUri(repoPath: string, uri: Uri): Promise<Uri | undefined> {
 		let relativePath = this.getRelativePath(uri, repoPath);
 
-		let data;
 		let result;
 		let rev;
 		do {
-			data = await this.git.ls_files(repoPath, relativePath);
-			if (data != null) {
-				relativePath = splitSingle(data, '\n')[0];
-				break;
-			}
+			if (await this.revision.exists(repoPath, relativePath)) break;
 
 			// TODO: Add caching
 
@@ -1226,7 +1221,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 						if (networkPath != null) {
 							// If the repository is at the root of the mapped drive then we
 							// have to append `\` (ex: D:\) otherwise the path is not valid.
-							const isDriveRoot = pathEquals(repoUri.fsPath, networkPath);
+							const isDriveRoot = arePathsEqual(repoUri.fsPath, networkPath);
 
 							repoPath = normalizePath(
 								repoUri.fsPath.replace(
@@ -1255,7 +1250,7 @@ export class LocalGitProvider implements GitProvider, Disposable {
 							return;
 						}
 
-						if (pathEquals(uri.fsPath, resolvedPath)) {
+						if (arePathsEqual(uri.fsPath, resolvedPath)) {
 							Logger.debug(scope, `No symlink detected; repoPath=${repoPath}`);
 							resolve([repoPath!, undefined]);
 							return;
@@ -1996,14 +1991,14 @@ export class LocalGitProvider implements GitProvider, Disposable {
 				}
 
 				// Even if we have a ref, check first to see if the file exists (that way the cache will be better reused)
-				let tracked = Boolean(await this.git.ls_files(repoPath, relativePath));
+				let tracked = await this.revision.exists(repoPath, relativePath);
 				if (tracked) return [relativePath, repoPath];
 
 				if (repoPath) {
 					const [newRelativePath, newRepoPath] = splitPath(path, '', true);
 					if (newRelativePath !== relativePath) {
 						// If we didn't find it, check it as close to the file as possible (will find nested repos)
-						tracked = Boolean(await this.git.ls_files(newRepoPath, newRelativePath));
+						tracked = await this.revision.exists(newRepoPath, newRelativePath);
 						if (tracked) {
 							repository = await this.container.git.getOrOpenRepository(Uri.file(path), {
 								detectNested: true,
@@ -2018,10 +2013,10 @@ export class LocalGitProvider implements GitProvider, Disposable {
 				}
 
 				if (!tracked && ref && !isUncommitted(ref)) {
-					tracked = Boolean(await this.git.ls_files(repoPath, relativePath, { rev: ref }));
+					tracked = await this.revision.exists(repoPath, relativePath, ref);
 					// If we still haven't found this file, make sure it wasn't deleted in that ref (i.e. check the previous)
 					if (!tracked) {
-						tracked = Boolean(await this.git.ls_files(repoPath, relativePath, { rev: `${ref}^` }));
+						tracked = await this.revision.exists(repoPath, relativePath, `${ref}^`);
 					}
 				}
 

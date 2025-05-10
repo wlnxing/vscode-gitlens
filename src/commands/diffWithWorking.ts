@@ -1,23 +1,25 @@
 import type { TextDocumentShowOptions, TextEditor, Uri } from 'vscode';
 import { window } from 'vscode';
 import type { Container } from '../container';
+import type { DiffRange } from '../git/gitProvider';
 import { GitUri } from '../git/gitUri';
 import { deletedOrMissing, uncommittedStaged } from '../git/models/revision';
 import { createReference } from '../git/utils/reference.utils';
 import { showGenericErrorMessage } from '../messages';
 import { showRevisionFilesPicker } from '../quickpicks/revisionFilesPicker';
 import { command, executeCommand } from '../system/-webview/command';
-import { getOrOpenTextEditor } from '../system/-webview/vscode/editors';
+import { getOrOpenTextEditor, selectionToDiffRange } from '../system/-webview/vscode/editors';
 import { getTabUris, getVisibleTabs } from '../system/-webview/vscode/tabs';
 import { Logger } from '../system/logger';
-import { uriEquals } from '../system/uri';
+import { areUrisEqual } from '../system/uri';
 import { ActiveEditorCommand } from './commandBase';
 import { getCommandUri } from './commandBase.utils';
 import type { DiffWithCommandArgs } from './diffWith';
 
 export interface DiffWithWorkingCommandArgs {
 	uri?: Uri;
-	line?: number;
+
+	range?: DiffRange;
 	showOptions?: TextDocumentShowOptions;
 	lhsTitle?: string;
 }
@@ -36,13 +38,9 @@ export class DiffWithWorkingCommand extends ActiveEditorCommand {
 		} else {
 			uri = args.uri;
 		}
+		args.range ??= selectionToDiffRange(editor?.selection);
 
 		let gitUri = await GitUri.fromUri(uri);
-
-		if (args.line == null) {
-			args.line = editor?.selection.active.line ?? 0;
-		}
-
 		let isInRightSideOfDiffEditor = false;
 
 		// Figure out if we are in a diff editor and if so, which side
@@ -50,7 +48,7 @@ export class DiffWithWorkingCommand extends ActiveEditorCommand {
 		if (tab != null) {
 			const uris = getTabUris(tab);
 			// If there is an original, then we are in a diff editor -- modified is right, original is left
-			if (uris.original != null && uriEquals(uri, uris.modified)) {
+			if (uris.original != null && areUrisEqual(uri, uris.modified)) {
 				isInRightSideOfDiffEditor = true;
 			}
 		}
@@ -87,19 +85,15 @@ export class DiffWithWorkingCommand extends ActiveEditorCommand {
 
 		// If we are a fake "staged" sha, check the status
 		if (gitUri.isUncommittedStaged) {
-			const status = await this.container.git.status(gitUri.repoPath!).getStatusForFile?.(gitUri);
+			const status = await this.container.git
+				.status(gitUri.repoPath!)
+				.getStatusForFile?.(gitUri, { renames: false });
 			if (status?.indexStatus != null) {
 				void (await executeCommand<DiffWithCommandArgs>('gitlens.diffWith', {
 					repoPath: gitUri.repoPath,
-					lhs: {
-						sha: uncommittedStaged,
-						uri: gitUri.documentUri(),
-					},
-					rhs: {
-						sha: '',
-						uri: gitUri.documentUri(),
-					},
-					line: args.line,
+					lhs: { sha: uncommittedStaged, uri: gitUri.documentUri() },
+					rhs: { sha: '', uri: gitUri.documentUri() },
+					range: args.range,
 					showOptions: args.showOptions,
 				}));
 
@@ -139,7 +133,7 @@ export class DiffWithWorkingCommand extends ActiveEditorCommand {
 				sha: '',
 				uri: workingUri,
 			},
-			line: args.line,
+			range: args.range,
 			showOptions: args.showOptions,
 		}));
 	}

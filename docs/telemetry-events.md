@@ -114,17 +114,18 @@
 
 ```typescript
 {
-  'changeType': 'wip' | 'stash' | 'commit' | 'draft-stash' | 'draft-patch' | 'draft-suggested_pr_change',
+  'changeType': 'wip' | 'stash' | 'commit' | 'branch' | 'draft-stash' | 'draft-patch' | 'draft-suggested_pr_change',
   'config.largePromptThreshold': number,
   'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -149,13 +150,14 @@
   'config.largePromptThreshold': number,
   'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -179,13 +181,14 @@ or
   'config.usedCustomInstructions': boolean,
   'draftType': 'stash' | 'patch' | 'suggested_pr_change',
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -208,13 +211,14 @@ or
   'config.largePromptThreshold': number,
   'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -237,13 +241,14 @@ or
   'config.largePromptThreshold': number,
   'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -266,13 +271,14 @@ or
   'config.largePromptThreshold': number,
   'config.usedCustomInstructions': boolean,
   'duration': number,
+  'failed': boolean,
   'failed.cancelled.reason': 'large-prompt',
   'failed.error': string,
   'failed.error.detail': string,
   'failed.reason': 'user-declined' | 'user-cancelled' | 'error',
   'input.length': number,
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string,
   'output.length': number,
   'retry.count': number,
@@ -295,7 +301,7 @@ or
 ```typescript
 {
   'model.id': string,
-  'model.provider.id': 'anthropic' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'openai' | 'openrouter' | 'vscode' | 'xai',
+  'model.provider.id': 'anthropic' | 'azure' | 'deepseek' | 'gemini' | 'github' | 'gitkraken' | 'huggingface' | 'ollama' | 'openai' | 'openaicompatible' | 'openrouter' | 'vscode' | 'xai',
   'model.provider.name': string
 }
 ```
@@ -903,25 +909,7 @@ or
 
 ### graph/row/hovered
 
-> Sent when the user hovers over a row on the Commit Graph
-
-```typescript
-{
-  'context.repository.closed': boolean,
-  'context.repository.folder.scheme': string,
-  'context.repository.id': string,
-  'context.repository.provider.id': string,
-  'context.repository.scheme': string,
-  'context.webview.host': 'editor' | 'view',
-  'context.webview.id': string,
-  'context.webview.instanceId': string,
-  'context.webview.type': string
-}
-```
-
-### graph/row/selected
-
-> Sent when the user selects (clicks on) a row or rows on the Commit Graph
+> Sent when the user hovers over a row on the Commit Graph (first time and every 100 times after)
 
 ```typescript
 {
@@ -934,6 +922,26 @@ or
   'context.webview.id': string,
   'context.webview.instanceId': string,
   'context.webview.type': string,
+  'count': number
+}
+```
+
+### graph/row/selected
+
+> Sent when the user selects (clicks on) a row or rows on the Commit Graph (first time and every 100 times after)
+
+```typescript
+{
+  'context.repository.closed': boolean,
+  'context.repository.folder.scheme': string,
+  'context.repository.id': string,
+  'context.repository.provider.id': string,
+  'context.repository.scheme': string,
+  'context.webview.host': 'editor' | 'view',
+  'context.webview.id': string,
+  'context.webview.instanceId': string,
+  'context.webview.type': string,
+  'count': number,
   'rows': number
 }
 ```
@@ -974,6 +982,10 @@ or
   'context.webview.instanceId': string,
   'context.webview.type': string,
   'duration': number,
+  'failed': boolean,
+  'failed.error': string,
+  'failed.error.detail': string,
+  'failed.reason': 'cancelled' | 'error',
   'matches': number,
   'types': string
 }
@@ -1158,6 +1170,14 @@ or
   'duration': number,
   'loading': boolean
 }
+```
+
+### home/changeBranchMergeTarget
+
+> Sent when the user starts defining a user-specific merge target branch
+
+```typescript
+void
 ```
 
 ### home/command
@@ -1997,11 +2017,14 @@ or
 
 ### timeline/action/openInEditor
 
-> Sent when the user changes the period (timeframe) on the Visual History
+> Sent when the user clicks on the "Open in Editor" button on the Visual History
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'branch' | 'author',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -2015,11 +2038,34 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'branch' | 'author',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
   'context.webview.type': string
+}
+```
+
+### timeline/config/changed
+
+> Sent when the user changes the configuration of the Visual History (e.g. period, show all branches, etc)
+
+```typescript
+{
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'branch' | 'author',
+  'context.webview.host': 'editor' | 'view',
+  'context.webview.id': string,
+  'context.webview.instanceId': string,
+  'context.webview.type': string,
+  'period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'showAllBranches': boolean,
+  'sliceBy': 'branch' | 'author'
 }
 ```
 
@@ -2029,27 +2075,14 @@ or
 
 ```typescript
 {
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'branch' | 'author',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
   'context.webview.type': string
-}
-```
-
-### timeline/period/changed
-
-> Sent when the user changes the period (timeframe) on the Visual History
-
-```typescript
-{
-  'context.period': string,
-  'context.webview.host': 'editor' | 'view',
-  'context.webview.id': string,
-  'context.webview.instanceId': string,
-  'context.webview.type': string,
-  'period.new': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
-  'period.old': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`
 }
 ```
 
@@ -2074,7 +2107,10 @@ or
 {
   'context.config.allowMultiple': boolean,
   'context.config.queryLimit': number,
-  'context.period': string,
+  'context.itemType': 'file' | 'folder',
+  'context.period': 'all' | `${number}|D` | `${number}|M` | `${number}|Y`,
+  'context.showAllBranches': boolean,
+  'context.sliceBy': 'branch' | 'author',
   'context.webview.host': 'editor' | 'view',
   'context.webview.id': string,
   'context.webview.instanceId': string,
@@ -2112,7 +2148,8 @@ or
 ```typescript
 {
   'command': string,
-  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
+  'detail': string,
+  'name': 'open/ai-custom-instructions-settings' | 'open/ai-enable-setting' | 'open/ai-settings' | 'open/help-center/ai-features' | 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect' | 'switch/ai-model',
   'type': 'command'
 }
 ```
@@ -2121,7 +2158,8 @@ or
 
 ```typescript
 {
-  'name': 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect',
+  'detail': string,
+  'name': 'open/ai-custom-instructions-settings' | 'open/ai-enable-setting' | 'open/ai-settings' | 'open/help-center/ai-features' | 'open/help-center/start-integrations' | 'open/help-center/accelerate-pr-reviews' | 'open/help-center/streamline-collaboration' | 'open/help-center/interactive-code-history' | 'open/help-center/community-vs-pro' | 'open/help-center/home-view' | 'open/devex-platform' | 'open/drafts' | 'open/home' | 'connect/integrations' | 'open/autolinks' | 'open/graph' | 'open/launchpad' | 'create/worktree' | 'open/help-center' | 'plus/sign-up' | 'plus/upgrade' | 'plus/reactivate' | 'open/walkthrough' | 'open/inspect' | 'switch/ai-model',
   'type': 'url',
   'url': string
 }
@@ -2131,7 +2169,7 @@ or
 
 ```typescript
 {
-  'context.key': 'integrations' | 'homeView' | 'gettingStarted' | 'visualizeCodeHistory' | 'prReviews' | 'streamlineCollaboration'
+  'context.key': 'integrations' | 'homeView' | 'gettingStarted' | 'visualizeCodeHistory' | 'prReviews' | 'streamlineCollaboration' | 'aiFeatures'
 }
 ```
 

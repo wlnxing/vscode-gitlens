@@ -39,6 +39,7 @@ import { getScheme, isAbsolute, maybeUri, normalizePath } from '../system/path';
 import type { Deferred } from '../system/promise';
 import { asSettled, defer, getDeferredPromiseIfPending, getSettledValue } from '../system/promise';
 import { VisitedPathsTrie } from '../system/trie';
+import { areUrisEqual } from '../system/uri';
 import type {
 	CachedGitTypes,
 	GitBranchesSubProvider,
@@ -84,12 +85,8 @@ import { calculateDistribution } from './utils/contributor.utils';
 import { getRemoteThemeIconString, getVisibilityCacheKey } from './utils/remote.utils';
 import { createRevisionRange } from './utils/revision.utils';
 
-const emptyArray = Object.freeze([]) as unknown as any[];
-const emptyDisposable = Object.freeze({
-	dispose: () => {
-		/* noop */
-	},
-});
+const emptyArray: readonly any[] = Object.freeze([]);
+const emptyDisposable: Disposable = Object.freeze({ dispose: () => {} });
 
 const maxDefaultBranchWeight = 100;
 const weightedDefaultBranches = new Map<string, number>([
@@ -179,7 +176,7 @@ export class GitProviderService implements Disposable {
 						const since = '1.year.ago';
 						const [remotesResult, contributorsStatsResult] = await Promise.allSettled([
 							repo.git.remotes().getRemotes(),
-							repo.git.contributors().getContributorsStats({ since: since, timeout: 2000 }),
+							repo.git.contributors().getContributorsStats({ since: since }, undefined, 2000),
 						]);
 
 						const remotes = getSettledValue(remotesResult) ?? [];
@@ -1963,6 +1960,17 @@ export class GitProviderService implements Disposable {
 			if (provider.hasUnsafeRepositories?.()) return true;
 		}
 		return false;
+	}
+
+	isRepositoryPathOrUri(uri: Uri): boolean;
+	isRepositoryPathOrUri(path: string): boolean;
+	isRepositoryPathOrUri(pathOrUri: string | Uri): boolean;
+	@log({ exit: true })
+	isRepositoryPathOrUri(pathOrUri: string | Uri): boolean {
+		if (typeof pathOrUri === 'string') {
+			return this.getRepository(pathOrUri)?.path === pathOrUri;
+		}
+		return areUrisEqual(pathOrUri, this.getRepository(pathOrUri)?.uri);
 	}
 
 	@log({ exit: true })

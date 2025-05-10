@@ -3,6 +3,7 @@ import { env, Range, Uri, window, workspace } from 'vscode';
 import type { DiffWithCommandArgs } from '../../commands/diffWith';
 import type { DiffWithPreviousCommandArgs } from '../../commands/diffWithPrevious';
 import type { DiffWithWorkingCommandArgs } from '../../commands/diffWithWorking';
+import type { ExplainCommitCommandArgs } from '../../commands/explainCommit';
 import type { OpenFileOnRemoteCommandArgs } from '../../commands/openFileOnRemote';
 import type { OpenOnlyChangedFilesCommandArgs } from '../../commands/openOnlyChangedFiles';
 import type { OpenWorkingFileCommandArgs } from '../../commands/openWorkingFile';
@@ -10,6 +11,7 @@ import type { ShowQuickCommitCommandArgs } from '../../commands/showQuickCommit'
 import type { ShowQuickCommitFileCommandArgs } from '../../commands/showQuickCommitFile';
 import type { FileAnnotationType } from '../../config';
 import { GlyphChars } from '../../constants';
+import type { Source } from '../../constants.telemetry';
 import { Container } from '../../container';
 import { showRevisionFilesPicker } from '../../quickpicks/revisionFilesPicker';
 import { executeCommand, executeCoreGitCommand, executeEditorCommand } from '../../system/-webview/command';
@@ -751,12 +753,23 @@ export async function showInCommitGraph(
 	}));
 }
 
+export async function explainCommit(
+	commit: GitRevisionReference | GitCommit,
+	options?: { source?: Source },
+): Promise<void> {
+	void (await executeCommand<ExplainCommitCommandArgs>('gitlens.ai.explainCommit', {
+		repoPath: commit.repoPath,
+		ref: commit.ref,
+		source: options?.source,
+	}));
+}
+
 export async function openOnlyChangedFiles(container: Container, commit: GitCommit): Promise<void>;
 export async function openOnlyChangedFiles(container: Container, files: GitFile[]): Promise<void>;
 export async function openOnlyChangedFiles(container: Container, commitOrFiles: GitCommit | GitFile[]): Promise<void> {
 	let files;
 	if (isCommit(commitOrFiles)) {
-		if (commitOrFiles.fileset?.files == null || commitOrFiles.fileset?.filtered) {
+		if (commitOrFiles.hasFullDetails()) {
 			await commitOrFiles.ensureFullDetails();
 		}
 

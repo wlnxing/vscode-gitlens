@@ -11,6 +11,7 @@ import type { ExplainStashCommandArgs } from '../../commands/explainStash';
 import type { ExplainWipCommandArgs } from '../../commands/explainWip';
 import type { OpenPullRequestOnRemoteCommandArgs } from '../../commands/openPullRequestOnRemote';
 import type { ContextKeys } from '../../constants.context';
+import { isSupportedCloudIntegrationId } from '../../constants.integrations';
 import type { InspectTelemetryContext, Sources } from '../../constants.telemetry';
 import type { Container } from '../../container';
 import type { CommitSelectedEvent } from '../../eventBus';
@@ -47,7 +48,7 @@ import { confirmDraftStorage } from '../../plus/drafts/utils/-webview/drafts.uti
 import type { Subscription } from '../../plus/gk/models/subscription';
 import type { SubscriptionChangeEvent } from '../../plus/gk/subscriptionService';
 import { ensureAccount } from '../../plus/gk/utils/-webview/acount.utils';
-import type { ConnectionStateChangeEvent } from '../../plus/integrations/integrationService';
+import type { ConfiguredIntegrationsChangeEvent } from '../../plus/integrations/authentication/configuredIntegrationService';
 import { supportsCodeSuggest } from '../../plus/integrations/providers/models';
 import { getEntityIdentifierInput } from '../../plus/integrations/providers/utils';
 import {
@@ -166,7 +167,7 @@ interface Context {
 	orgSettings: State['orgSettings'];
 	source?: Sources;
 	hasAccount: boolean | undefined;
-	hasIntegrationsConnected: boolean;
+	hasIntegrationsConnected: boolean | undefined;
 }
 
 export class CommitDetailsWebviewProvider
@@ -206,14 +207,14 @@ export class CommitDetailsWebviewProvider
 			wip: undefined,
 			orgSettings: this.getOrgSettings(),
 			hasAccount: undefined,
-			hasIntegrationsConnected: false,
+			hasIntegrationsConnected: undefined,
 		};
 
 		this._disposable = Disposable.from(
 			configuration.onDidChangeAny(this.onAnyConfigurationChanged, this),
 			onDidChangeContext(this.onContextChanged, this),
 			this.container.subscription.onDidChange(this.onSubscriptionChanged, this),
-			container.integrations.onDidChangeConnectionState(this.onIntegrationConnectionStateChanged, this),
+			container.integrations.onDidChangeConfiguredIntegrations(this.onIntegrationsChanged, this),
 		);
 	}
 
@@ -913,20 +914,27 @@ export class CommitDetailsWebviewProvider
 		return this._context.hasAccount;
 	}
 
-	private async onIntegrationConnectionStateChanged(e: ConnectionStateChangeEvent) {
-		const isConnected = e.reason === 'connected';
-		if (this._context.hasIntegrationsConnected === isConnected) return;
+	private async onIntegrationsChanged(_e: ConfiguredIntegrationsChangeEvent) {
+		const previous = this._context.hasIntegrationsConnected;
+		const current = await this.getHasIntegrationsConnected(true);
+		if (previous === current) return;
 
 		void this.host.notify(DidChangeIntegrationsNotification, {
-			hasIntegrationsConnected: await this.getHasIntegrationsConnected(true),
+			hasIntegrationsConnected: current,
 		});
 	}
 
 	async getHasIntegrationsConnected(force = false): Promise<boolean> {
-		if (this._context.hasIntegrationsConnected != null && !force) return this._context.hasIntegrationsConnected;
-
-		const hasAny = (await this.container.integrations.getConfigured()).length > 0;
-		this._context.hasIntegrationsConnected = hasAny;
+		if (force || this._context.hasIntegrationsConnected == null) {
+			const configured = await this.container.integrations.getConfigured();
+			if (configured.length > 0) {
+				this._context.hasIntegrationsConnected = configured.some(i =>
+					isSupportedCloudIntegrationId(i.integrationId),
+				);
+			} else {
+				this._context.hasIntegrationsConnected = false;
+			}
+		}
 
 		return this._context.hasIntegrationsConnected;
 	}
@@ -1335,7 +1343,7 @@ export class CommitDetailsWebviewProvider
 		repository: Repository,
 		branchName: string,
 	): Promise<{ branch: GitBranch; pullRequest: PullRequest | undefined; codeSuggestions: Draft[] } | undefined> {
-		const branch = await repository.git.branches().getBranch(branchName);
+		const branch = await repository.git.branches.getBranch(branchName);
 		if (branch == null) return undefined;
 
 		if (this.mode === 'commit') {
@@ -1426,7 +1434,9 @@ export class CommitDetailsWebviewProvider
 		const { commit } = current;
 		if (commit == null) return;
 
-		const remote = await this.container.git.remotes(commit.repoPath).getBestRemoteWithIntegration();
+		const remote = await this.container.git
+			.getRepositoryService(commit.repoPath)
+			.remotes.getBestRemoteWithIntegration();
 
 		if (cancellation.isCancellationRequested) return;
 
@@ -1486,10 +1496,12 @@ export class CommitDetailsWebviewProvider
 			commit = commitish;
 		} else if (commitish != null) {
 			if (commitish.refType === 'stash') {
-				const gitStash = await this.container.git.stash(commitish.repoPath)?.getStash();
+				const gitStash = await this.container.git.getRepositoryService(commitish.repoPath).stash?.getStash();
 				commit = gitStash?.stashes.get(commitish.ref);
 			} else {
-				commit = await this.container.git.commits(commitish.repoPath).getCommit(commitish.ref);
+				commit = await this.container.git
+					.getRepositoryService(commitish.repoPath)
+					.commits.getCommit(commitish.ref);
 			}
 		}
 
@@ -1570,7 +1582,7 @@ export class CommitDetailsWebviewProvider
 	}
 
 	private async getWipChange(repository: Repository): Promise<WipChange | undefined> {
-		const status = await this.container.git.status(repository.path).getStatus();
+		const status = await this.container.git.getRepositoryService(repository.path).status.getStatus();
 		if (status == null) return undefined;
 
 		const files: GitFileChangeShape[] = [];
@@ -1768,7 +1780,9 @@ export class CommitDetailsWebviewProvider
 		const [commitResult, avatarUriResult, remoteResult] = await Promise.allSettled([
 			!commit.hasFullDetails() ? commit.ensureFullDetails().then(() => commit) : commit,
 			commit.author.getAvatarUri(commit, { size: 32 }),
-			this.container.git.remotes(commit.repoPath).getBestRemoteWithIntegration({ includeDisconnected: true }),
+			this.container.git
+				.getRepositoryService(commit.repoPath)
+				.remotes.getBestRemoteWithIntegration({ includeDisconnected: true }),
 		]);
 
 		commit = getSettledValue(commitResult, commit);
@@ -1826,7 +1840,7 @@ export class CommitDetailsWebviewProvider
 			const uri = this._context.wip?.changes?.repository.uri;
 			if (uri == null) return;
 
-			commit = await this.container.git.commits(Uri.parse(uri)).getCommit(uncommitted);
+			commit = await this.container.git.getRepositoryService(Uri.parse(uri)).commits.getCommit(uncommitted);
 		} else {
 			commit = this._context.commit;
 		}
@@ -1954,7 +1968,7 @@ export class CommitDetailsWebviewProvider
 
 		const [commit, file] = result;
 
-		await this.container.git.staging(commit.repoPath)?.stageFile(file.path);
+		await this.container.git.getRepositoryService(commit.repoPath).staging?.stageFile(file.path);
 	}
 
 	private async unstageFile(params: ExecuteFileActionParams) {
@@ -1963,7 +1977,7 @@ export class CommitDetailsWebviewProvider
 
 		const [commit, file] = result;
 
-		await this.container.git.staging(commit.repoPath)?.unstageFile(file.path);
+		await this.container.git.getRepositoryService(commit.repoPath).staging?.unstageFile(file.path);
 	}
 
 	private getShowOptions(params: ExecuteFileActionParams): TextDocumentShowOptions | undefined {

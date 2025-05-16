@@ -53,7 +53,7 @@ export class ExplainBranchCommand extends GlCommandBase {
 			repository = await getBestRepositoryOrShowPicker(
 				gitUri,
 				editor,
-				'Explain Branch',
+				'Explain Branch Changes',
 				'Choose which repository to explain a branch from',
 			);
 		}
@@ -66,7 +66,7 @@ export class ExplainBranchCommand extends GlCommandBase {
 				// If no ref is provided, show a picker to select a branch
 				const pick = (await showReferencePicker(
 					repository.path,
-					'Explain Branch',
+					'Explain Branch Changes',
 					'Choose a branch to explain',
 					{
 						include: ReferencesQuickPickIncludes.Branches,
@@ -78,7 +78,7 @@ export class ExplainBranchCommand extends GlCommandBase {
 			}
 
 			// Get the branch
-			const branch = await repository.git.branches().getBranch(args.ref);
+			const branch = await repository.git.branches.getBranch(args.ref);
 			if (branch == null) {
 				void showGenericErrorMessage('Unable to find the specified branch');
 				return;
@@ -88,7 +88,7 @@ export class ExplainBranchCommand extends GlCommandBase {
 			const baseBranchNameResult = await getBranchMergeTargetName(this.container, branch);
 			let baseBranch;
 			if (!baseBranchNameResult.paused) {
-				baseBranch = await repository.git.branches().getBranch(baseBranchNameResult.value);
+				baseBranch = await repository.git.branches.getBranch(baseBranchNameResult.value);
 			}
 
 			if (!baseBranch) {

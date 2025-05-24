@@ -27,7 +27,7 @@ import { first } from '../../system/iterable';
 import { Logger } from '../../system/logger';
 import type { LogScope } from '../../system/logger.scope';
 import { getLogScope } from '../../system/logger.scope';
-import { isSubscriptionStatePaidOrTrial } from '../gk/utils/subscription.utils';
+import { isSubscriptionTrialOrPaidFromState } from '../gk/utils/subscription.utils';
 import type {
 	IntegrationAuthenticationProviderDescriptor,
 	IntegrationAuthenticationSessionDescriptor,
@@ -151,7 +151,7 @@ export abstract class IntegrationBase<
 
 	async access(): Promise<boolean> {
 		const subscription = await this.container.subscription.getSubscription();
-		return isSubscriptionStatePaidOrTrial(subscription.state);
+		return isSubscriptionTrialOrPaidFromState(subscription.state);
 	}
 
 	autolinks():
@@ -280,9 +280,20 @@ export abstract class IntegrationBase<
 		await this.container.storage.deleteWorkspace(this.connectedKey);
 	}
 
+	private skippedNonCloudReported = false;
 	@log()
 	async syncCloudConnection(state: 'connected' | 'disconnected', forceSync: boolean): Promise<void> {
-		if (this._session?.cloud === false) return;
+		if (this._session?.cloud === false) {
+			if (this.id !== HostingIntegrationId.GitHub && !this.skippedNonCloudReported) {
+				this.container.telemetry.sendEvent('cloudIntegrations/refreshConnection/skippedUnusualToken', {
+					'integration.id': this.id,
+					reason: 'skip-non-cloud',
+					cloud: false,
+				});
+				this.skippedNonCloudReported = true;
+			}
+			return;
+		}
 
 		switch (state) {
 			case 'connected':
@@ -327,6 +338,7 @@ export abstract class IntegrationBase<
 		return defaultValue;
 	}
 
+	private missingExpirityReported = false;
 	@gate()
 	protected async refreshSessionIfExpired(scope?: LogScope): Promise<void> {
 		if (this._session?.expiresAt != null && this._session.expiresAt < new Date()) {
@@ -336,6 +348,17 @@ export abstract class IntegrationBase<
 			} catch (ex) {
 				Logger.error(ex, scope);
 			}
+		} else if (
+			this._session?.expiresAt == null &&
+			this.id !== HostingIntegrationId.GitHub &&
+			!this.missingExpirityReported
+		) {
+			this.container.telemetry.sendEvent('cloudIntegrations/refreshConnection/skippedUnusualToken', {
+				'integration.id': this.id,
+				reason: 'missing-expiry',
+				cloud: this._session?.cloud,
+			});
+			this.missingExpirityReported = true;
 		}
 	}
 

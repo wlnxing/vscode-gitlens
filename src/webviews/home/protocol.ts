@@ -13,6 +13,7 @@ import type { Subscription } from '../../plus/gk/models/subscription';
 import type { LaunchpadSummaryResult } from '../../plus/launchpad/launchpadIndicator';
 import type { LaunchpadItem } from '../../plus/launchpad/launchpadProvider';
 import type { LaunchpadGroup } from '../../plus/launchpad/models/launchpad';
+import type { OpenWorkspaceLocation } from '../../system/-webview/vscode/workspaces';
 import type { IpcScope, WebviewState } from '../protocol';
 import { IpcCommand, IpcNotification, IpcRequest } from '../protocol';
 
@@ -28,6 +29,7 @@ export interface State extends WebviewState {
 		ai: boolean;
 	};
 	aiEnabled: boolean;
+	aiGenerateCommitsEnabled: boolean;
 	previewCollapsed: boolean;
 	integrationBannerCollapsed: boolean;
 	hasAnyIntegrationConnected: boolean;
@@ -282,6 +284,7 @@ export interface DidChangePreviewEnabledParams {
 	previewEnabled: boolean;
 	previewCollapsed: boolean;
 	aiEnabled: boolean;
+	aiGenerateCommitsEnabled: boolean;
 }
 export const DidChangePreviewEnabled = new IpcNotification<DidChangePreviewEnabledParams>(
 	scope,
@@ -351,6 +354,10 @@ export interface BranchRef {
 		name: string;
 		isDefault: boolean;
 	};
+}
+
+export interface OpenWorktreeCommandArgs extends BranchRef {
+	location?: OpenWorkspaceLocation;
 }
 
 export interface BranchAndTargetRefs extends BranchRef {

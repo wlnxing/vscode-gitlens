@@ -102,7 +102,6 @@ export class SearchResultsNode extends ViewNode<'search-results', SearchAndCompa
 				this._labels.label,
 				{ query: this._searchQueryOrLog, deferred: deferred },
 				{ expand: false },
-				true,
 			);
 		}
 
@@ -221,7 +220,8 @@ export class SearchResultsNode extends ViewNode<'search-results', SearchAndCompa
 		let useCacheOnce = true;
 
 		return async (limit: number | undefined) => {
-			log = await (log ?? this.view.container.git.commits(this.repoPath).searchCommits(this.search));
+			log = await (log ??
+				this.view.container.git.getRepositoryService(this.repoPath).commits.searchCommits(this.search));
 
 			if (!useCacheOnce && log?.query != null) {
 				log = await log.query(limit);

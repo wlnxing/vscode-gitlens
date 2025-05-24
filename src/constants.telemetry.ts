@@ -1,13 +1,13 @@
 import type { Config, GraphBranchesVisibility, GraphConfig } from './config';
 import type { WalkthroughSteps } from './constants';
 import type { AIProviders } from './constants.ai';
-import type { GlCommands } from './constants.commands';
+import type { GlCommands, GlCommandsDeprecated } from './constants.commands';
 import type { IntegrationId, SupportedCloudIntegrationIds } from './constants.integrations';
-import type { SubscriptionState, SubscriptionStateString } from './constants.subscription';
+import type { SubscriptionState } from './constants.subscription';
 import type { CustomEditorTypes, TreeViewTypes, WebviewTypes, WebviewViewTypes } from './constants.views';
 import type { FeaturePreviews, FeaturePreviewStatus } from './features';
 import type { GitContributionTiers } from './git/models/contributor';
-import type { Subscription, SubscriptionAccount } from './plus/gk/models/subscription';
+import type { Subscription, SubscriptionAccount, SubscriptionStateString } from './plus/gk/models/subscription';
 import type { Flatten } from './system/object';
 import type { WalkthroughContextKeys } from './telemetry/walkthroughStateProvider';
 import type { GraphColumnConfig } from './webviews/plus/graph/protocol';
@@ -83,6 +83,10 @@ export interface TelemetryEvents extends WebviewShowAbortedEvents, WebviewShownE
 
 	/** Sent when refreshing a provider token from the api fails */
 	'cloudIntegrations/refreshConnection/failed': CloudIntegrationsRefreshConnectionFailedEvent;
+
+	/** Sent when a connection session has a missing expiry date
+	 * or when connection refresh is skipped due to being a non-cloud session */
+	'cloudIntegrations/refreshConnection/skippedUnusualToken': CloudIntegrationsRefreshConnectionSkipUnusualTokenEvent;
 
 	/** Sent when a cloud-based hosting provider is connected */
 	'cloudIntegrations/hosting/connected': CloudIntegrationsHostingConnectedEvent;
@@ -364,12 +368,17 @@ export interface AIGenerateCreatePullRequestEventData extends AIEventDataBase {
 	type: 'createPullRequest';
 }
 
+export interface AIGenerateRebaseEventData extends AIEventDataBase {
+	type: 'rebase';
+}
+
 type AIGenerateEvent =
 	| AIGenerateCommitEventData
 	| AIGenerateDraftEventData
 	| AIGenerateStashEventData
 	| AIGenerateCreatePullRequestEventData
-	| AIGenerateChangelogEventData;
+	| AIGenerateChangelogEventData
+	| AIGenerateRebaseEventData;
 
 export type AISwitchModelEvent =
 	| {
@@ -405,6 +414,12 @@ interface CloudIntegrationsGetConnectionFailedEvent {
 interface CloudIntegrationsRefreshConnectionFailedEvent {
 	code: number | undefined;
 	'integration.id': string | undefined;
+}
+
+interface CloudIntegrationsRefreshConnectionSkipUnusualTokenEvent {
+	'integration.id': string;
+	reason: 'skip-non-cloud' | 'missing-expiry';
+	cloud: boolean | undefined;
 }
 
 interface CloudIntegrationsHostingConnectedEvent {
@@ -824,7 +839,6 @@ export interface SubscriptionCurrentEventData
 			Flatten<Subscription['plan'], 'subscription', true>,
 			'subscription.actual.name' | 'subscription.effective.name'
 		>,
-		Partial<Flatten<NonNullable<Subscription['previewTrial']>, 'subscription.previewTrial', true>>,
 		SubscriptionFeaturePreviewsEventData {}
 
 export interface SubscriptionPreviousEventData
@@ -832,8 +846,7 @@ export interface SubscriptionPreviousEventData
 		Omit<
 			Flatten<Subscription['plan'], 'previous.subscription', true>,
 			'previous.subscription.actual.name' | 'previous.subscription.effective.name'
-		>,
-		Partial<Flatten<NonNullable<Subscription['previewTrial']>, 'previous.subscription.previewTrial', true>> {}
+		> {}
 
 export interface SubscriptionEventData extends Partial<SubscriptionCurrentEventData> {
 	/** Promo key (identifier) associated with the upgrade */
@@ -1038,4 +1051,7 @@ export type TrackedUsageFeatures =
 	| `${TreeViewTypes | WebviewViewTypes}View`
 	| `${CustomEditorTypes}Editor`;
 export type WalkthroughUsageKeys = 'home:walkthrough:dismissed';
-export type TrackedUsageKeys = `${TrackedUsageFeatures}:shown` | `command:${string}:executed` | WalkthroughUsageKeys;
+export type TrackedUsageKeys =
+	| `${TrackedUsageFeatures}:shown`
+	| `command:${GlCommands | GlCommandsDeprecated}:executed`
+	| WalkthroughUsageKeys;

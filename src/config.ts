@@ -217,6 +217,14 @@ interface AIConfig {
 	readonly explainChanges: {
 		readonly customInstructions: string;
 	};
+	readonly experimental: {
+		readonly generateCommits: {
+			readonly enabled: boolean;
+		};
+		readonly generateRebase: {
+			readonly enabled: boolean;
+		};
+	};
 	readonly generateChangelog: {
 		readonly customInstructions: string;
 	};
@@ -806,6 +814,7 @@ export type ViewsConfig = ViewsCommonConfig & ViewsConfigs;
 export interface BranchesViewConfig {
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 	};
 	readonly files: ViewsFilesConfig;
@@ -908,6 +917,7 @@ export interface PullRequestViewConfig {
 export interface RemotesViewConfig {
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 	};
 	readonly files: ViewsFilesConfig;
@@ -924,6 +934,7 @@ export interface RepositoriesViewConfig {
 	readonly autoReveal: boolean;
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 		readonly showBranchComparison: false | Extract<ViewShowBranchComparison, 'branch'>;
 		readonly showStashes: boolean;
@@ -968,6 +979,7 @@ export interface StashesViewConfig {
 export interface TagsViewConfig {
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 	};
 	readonly files: ViewsFilesConfig;
@@ -979,6 +991,7 @@ export type ViewWorktreesViewAs = 'name' | 'path' | 'relativePath';
 export interface WorktreesViewConfig {
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 	};
 	readonly files: ViewsFilesConfig;
@@ -998,6 +1011,7 @@ export interface WorktreesViewConfig {
 export interface WorkspacesViewConfig {
 	readonly avatars: boolean;
 	readonly branches: {
+		readonly compact: boolean;
 		readonly layout: ViewBranchesLayout;
 		readonly showBranchComparison: false | Extract<ViewShowBranchComparison, 'branch'>;
 		readonly showStashes: boolean;

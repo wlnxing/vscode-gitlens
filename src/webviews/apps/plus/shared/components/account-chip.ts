@@ -3,18 +3,17 @@ import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { when } from 'lit/directives/when.js';
 import { urls } from '../../../../../constants';
-import { proTrialLengthInDays, SubscriptionPlanId, SubscriptionState } from '../../../../../constants.subscription';
+import { proTrialLengthInDays, SubscriptionState } from '../../../../../constants.subscription';
 import type { Source } from '../../../../../constants.telemetry';
 import type { SubscriptionUpgradeCommandArgs } from '../../../../../plus/gk/models/subscription';
 import {
 	compareSubscriptionPlans,
-	getSubscriptionPlanTier,
-	getSubscriptionStateName,
+	getSubscriptionPlanName,
+	getSubscriptionProductPlanNameFromState,
 	getSubscriptionTimeRemaining,
-	hasAccountFromSubscriptionState,
 	isSubscriptionPaid,
-	isSubscriptionStatePaidOrTrial,
 	isSubscriptionTrial,
+	isSubscriptionTrialOrPaidFromState,
 } from '../../../../../plus/gk/utils/subscription.utils';
 import { createCommandLink } from '../../../../../system/commands';
 import { pluralize } from '../../../../../system/string';
@@ -268,24 +267,24 @@ export class GlAccountChip extends LitElement {
 	}
 
 	private get hasAccount() {
-		return hasAccountFromSubscriptionState(this.subscriptionState);
+		return this.subscription?.account != null;
 	}
 
 	get isReactivatedTrial(): boolean {
 		return (
-			this.subscriptionState === SubscriptionState.ProTrial &&
+			this.subscriptionState === SubscriptionState.Trial &&
 			(this.subscription?.plan.effective.trialReactivationCount ?? 0) > 0
 		);
 	}
 	private get planId() {
-		return this._state.subscription?.plan.actual.id ?? SubscriptionPlanId.Pro;
+		return this._state.subscription?.plan.actual.id ?? 'pro';
 	}
 	private get effectivePlanId() {
-		return this._state.subscription?.plan.effective.id ?? SubscriptionPlanId.Pro;
+		return this._state.subscription?.plan.effective.id ?? 'pro';
 	}
 
 	private get planName() {
-		return getSubscriptionStateName(this.subscriptionState, this.planId, this.effectivePlanId);
+		return getSubscriptionProductPlanNameFromState(this.subscriptionState, this.planId, this.effectivePlanId);
 	}
 
 	private get planTier() {
@@ -293,7 +292,7 @@ export class GlAccountChip extends LitElement {
 			return 'Pro Trial';
 		}
 
-		return getSubscriptionPlanTier(this.planId);
+		return getSubscriptionPlanName(this.planId);
 	}
 
 	@consume({ context: promosContext })
@@ -418,32 +417,31 @@ export class GlAccountChip extends LitElement {
 				)}
 			</span>
 			${when(
-				isSubscriptionStatePaidOrTrial(this.subscription.state),
+				isSubscriptionTrialOrPaidFromState(this.subscription.state),
 				() =>
 					html`<span class="row">
 						<span class="row__media"><code-icon icon="unlock" size="20"></code-icon></span>
 						<span class="details"
 							><p class="details__title">
 								${isSubscriptionTrial(this.subscription)
-									? html`${getSubscriptionPlanTier(this.effectivePlanId)} plan
+									? html`${getSubscriptionPlanName(this.effectivePlanId)} plan
 											<span class="details__subtitle">(trial)</span>`
-									: html`${getSubscriptionPlanTier(this.planId)} plan`}
+									: html`${getSubscriptionPlanName(this.planId)} plan`}
 							</p></span
 						>
-						${isSubscriptionPaid(this.subscription) &&
-						compareSubscriptionPlans(this.planId, SubscriptionPlanId.Advanced) < 0
+						${isSubscriptionPaid(this.subscription) && compareSubscriptionPlans(this.planId, 'advanced') < 0
 							? html`<div class="details__button">
 									<gl-button
 										appearance="secondary"
 										href="${createCommandLink<SubscriptionUpgradeCommandArgs>(
 											'gitlens.plus.upgrade',
 											{
-												plan: SubscriptionPlanId.Advanced,
+												plan: 'advanced',
 												source: 'account',
 												detail: {
 													location: 'plan-section:upgrade-button',
 													organization: this._state.subscription?.activeOrganization?.id,
-													plan: SubscriptionPlanId.Advanced,
+													plan: 'advanced',
 												},
 											},
 										)}"
@@ -489,7 +487,7 @@ export class GlAccountChip extends LitElement {
 					</button-container>
 				</div>`;
 
-			case SubscriptionState.ProTrial: {
+			case SubscriptionState.Trial: {
 				const days = this.trialDaysRemaining;
 
 				return html`<div class="account-status">
@@ -511,12 +509,12 @@ export class GlAccountChip extends LitElement {
 						<gl-button
 							full
 							href="${createCommandLink<SubscriptionUpgradeCommandArgs>('gitlens.plus.upgrade', {
-								plan: SubscriptionPlanId.Pro,
+								plan: 'pro',
 								source: 'account',
 								detail: {
 									location: 'upgrade-button',
 									organization: this._state.subscription?.activeOrganization?.id,
-									plan: SubscriptionPlanId.Pro,
+									plan: 'pro',
 								},
 							})}"
 							>Upgrade to Pro</gl-button
@@ -526,7 +524,7 @@ export class GlAccountChip extends LitElement {
 				</div>`;
 			}
 
-			case SubscriptionState.ProTrialExpired:
+			case SubscriptionState.TrialExpired:
 				return html`<div class="account-status">
 					<p>Thank you for trying <a href="${urls.communityVsPro}">GitLens Pro</a>.</p>
 					<p>Continue leveraging Pro features and workflows on privately-hosted repos by upgrading today.</p>
@@ -534,12 +532,12 @@ export class GlAccountChip extends LitElement {
 						<gl-button
 							full
 							href="${createCommandLink<SubscriptionUpgradeCommandArgs>('gitlens.plus.upgrade', {
-								plan: SubscriptionPlanId.Pro,
+								plan: 'pro',
 								source: 'account',
 								detail: {
 									location: 'upgrade-button',
 									organization: this._state.subscription?.activeOrganization?.id,
-									plan: SubscriptionPlanId.Pro,
+									plan: 'pro',
 								},
 							})}"
 							>Upgrade to Pro</gl-button
@@ -548,7 +546,7 @@ export class GlAccountChip extends LitElement {
 					${this.renderPromo()} ${this.renderIncludesDevEx()} ${this.renderReferFriend()}
 				</div>`;
 
-			case SubscriptionState.ProTrialReactivationEligible:
+			case SubscriptionState.TrialReactivationEligible:
 				return html`<div class="account-status">
 					<p>
 						Reactivate your GitLens Pro trial and experience all the new Pro features — free for another
@@ -636,12 +634,12 @@ export class GlAccountChip extends LitElement {
 						<gl-button
 							full
 							href="${createCommandLink<SubscriptionUpgradeCommandArgs>('gitlens.plus.upgrade', {
-								plan: SubscriptionPlanId.Pro,
+								plan: 'pro',
 								source: 'account',
 								detail: {
 									location: 'upgrade-chip:upgrade-button',
 									organization: this._state.subscription?.activeOrganization?.id,
-									plan: SubscriptionPlanId.Pro,
+									plan: 'pro',
 								},
 							})}"
 							>Upgrade to Pro</gl-button
@@ -663,12 +661,12 @@ export class GlAccountChip extends LitElement {
 						<gl-button
 							full
 							href="${createCommandLink<SubscriptionUpgradeCommandArgs>('gitlens.plus.upgrade', {
-								plan: SubscriptionPlanId.Advanced,
+								plan: 'advanced',
 								source: 'account',
 								detail: {
 									location: 'upgrade-chip:upgrade-button',
 									organization: this._state.subscription?.activeOrganization?.id,
-									plan: SubscriptionPlanId.Advanced,
+									plan: 'advanced',
 								},
 							})}"
 							>Upgrade to Advanced</gl-button

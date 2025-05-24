@@ -16,7 +16,6 @@ import {
 	vscodeProviderDescriptor,
 	xAIProviderDescriptor,
 } from '../../constants.ai';
-import { SubscriptionPlanId } from '../../constants.subscription';
 import type { AIGenerateDraftEventData, Source, TelemetryEvents } from '../../constants.telemetry';
 import type { Container } from '../../container';
 import {
@@ -49,7 +48,7 @@ import { getSettledValue, getSettledValues } from '../../system/promise';
 import { PromiseCache } from '../../system/promiseCache';
 import type { ServerConnection } from '../gk/serverConnection';
 import { ensureFeatureAccess } from '../gk/utils/-webview/acount.utils';
-import { compareSubscriptionPlans, getSubscriptionPlanTier, isSubscriptionPaid } from '../gk/utils/subscription.utils';
+import { compareSubscriptionPlans, getSubscriptionPlanName, isSubscriptionPaid } from '../gk/utils/subscription.utils';
 import type {
 	AIActionType,
 	AIModel,
@@ -90,6 +89,16 @@ export interface AISummarizeResult extends AIResult {
 		readonly summary: string;
 		readonly body: string;
 	};
+}
+
+export interface AIRebaseResult extends AIResult {
+	readonly diff: string;
+	readonly hunkMap: { index: number; hunkHeader: string }[];
+	readonly commits: {
+		readonly message: string;
+		readonly explanation: string;
+		readonly hunks: { hunk: number }[];
+	}[];
 }
 
 export interface AIGenerateChangelogChange {
@@ -493,15 +502,16 @@ export class AIProviderService implements Disposable {
 		sourceContext: AIExplainSource,
 		options?: { cancellation?: CancellationToken; progress?: ProgressOptions },
 	): Promise<AISummarizeResult | undefined> {
+		const svc = this.container.git.getRepositoryService(commitOrRevision.repoPath);
 		return this.explainChanges(
 			async cancellation => {
-				const diff = await this.container.git.diff(commitOrRevision.repoPath).getDiff?.(commitOrRevision.ref);
+				const diff = await svc.diff.getDiff?.(commitOrRevision.ref);
 				if (!diff?.contents) throw new AINoRequestDataError('No changes found to explain.');
 				if (cancellation.isCancellationRequested) throw new CancellationError();
 
 				const commit = isCommit(commitOrRevision)
 					? commitOrRevision
-					: await this.container.git.commits(commitOrRevision.repoPath).getCommit(commitOrRevision.ref);
+					: await svc.commits.getCommit(commitOrRevision.ref);
 				if (commit == null) throw new AINoRequestDataError('No commit found to explain.');
 				if (cancellation.isCancellationRequested) throw new CancellationError();
 
@@ -511,10 +521,7 @@ export class AIProviderService implements Disposable {
 					if (cancellation.isCancellationRequested) throw new CancellationError();
 				}
 
-				return {
-					diff: diff.contents,
-					message: commit.message,
-				};
+				return { diff: diff.contents, message: commit.message };
 			},
 			sourceContext,
 			options,
@@ -845,6 +852,120 @@ export class AIProviderService implements Disposable {
 		return result != null ? { ...result } : undefined;
 	}
 
+	async generateRebase(
+		repo: Repository,
+		baseRef: string,
+		headRef: string,
+		source: Source,
+		options?: {
+			cancellation?: CancellationToken;
+			context?: string;
+			generating?: Deferred<AIModel>;
+			progress?: ProgressOptions;
+		},
+	): Promise<AIRebaseResult | undefined> {
+		const result: Mutable<AIRebaseResult> = {
+			diff: undefined!,
+			explanation: undefined!,
+			hunkMap: [],
+			commits: [],
+		} as unknown as AIRebaseResult;
+
+		const rq = await this.sendRequest(
+			'generate-rebase',
+			async (model, reporting, cancellation, maxInputTokens, retries) => {
+				const [diffResult, logResult] = await Promise.allSettled([
+					repo.git.diff.getDiff?.(headRef, baseRef, { notation: '...' }),
+					repo.git.commits.getLog(`${baseRef}..${headRef}`),
+				]);
+
+				const diff = getSettledValue(diffResult);
+				const log = getSettledValue(logResult);
+
+				if (!diff?.contents || !log?.commits?.size) {
+					throw new AINoRequestDataError('No changes found to generate a rebase from.');
+				}
+				if (cancellation.isCancellationRequested) throw new CancellationError();
+
+				result.diff = diff.contents;
+
+				const hunkMap: { index: number; hunkHeader: string }[] = [];
+				let counter = 0;
+				//const filesDiffs = await repo.git.diff().getDiffFiles!(diff.contents)!;
+				//for (const f of filesDiffs!.files)
+				//for (const hunk of parsedDiff.hunks) {
+				//	hunkMap.push({ index: ++counter, hunkHeader: hunk.contents.split('\n', 1)[0] });
+				//}
+
+				// let hunksByNumber= '';
+
+				for (const hunkHeader of diff.contents.matchAll(/@@ -\d+,\d+ \+\d+,\d+ @@(.*)$/gm)) {
+					hunkMap.push({ index: ++counter, hunkHeader: hunkHeader[0] });
+				}
+
+				result.hunkMap = hunkMap;
+				// 	const hunkNumber = `hunk-${counter++}`;
+				// 	hunksByNumber += `${hunkNumber}: ${hunk[0]}\n`;
+				// }
+
+				// const commits: { diff: string; message: string }[] = [];
+				// for (const commit of [...log.commits.values()].sort((a, b) => a.date.getTime() - b.date.getTime())) {
+				// 	const diff = await repo.git.diff().getDiff?.(commit.ref);
+				// 	commits.push({ message: commit.message ?? commit.summary, diff: diff?.contents ?? '' });
+
+				// 	if (cancellation.isCancellationRequested) throw new CancellationError();
+				// }
+
+				const { prompt } = await this.getPrompt(
+					'generate-rebase',
+					model,
+					{
+						diff: diff.contents,
+						// commits: JSON.stringify(commits),
+						data: JSON.stringify(hunkMap),
+						context: options?.context,
+						// instructions: configuration.get('ai.generateRebase.customInstructions'),
+					},
+					maxInputTokens,
+					retries,
+					reporting,
+				);
+				if (cancellation.isCancellationRequested) throw new CancellationError();
+
+				const messages: AIChatMessage[] = [{ role: 'user', content: prompt }];
+				return messages;
+			},
+			m => `Generating rebase with ${m.name}...`,
+			source,
+			m => ({
+				key: 'ai/generate',
+				data: {
+					type: 'rebase',
+					'model.id': m.id,
+					'model.provider.id': m.provider.id,
+					'model.provider.name': m.provider.name,
+					'retry.count': 0,
+				},
+			}),
+			options,
+		);
+
+		try {
+			// if it is wrapped in markdown, we need to strip it
+			const content = rq!.content.replace(/^\s*```json\s*/, '').replace(/\s*```$/, '');
+			// Parse the JSON content from the result
+			result.commits = JSON.parse(content) as AIRebaseResult['commits'];
+		} catch {
+			debugger;
+			throw new Error('Unable to parse rebase result');
+		}
+
+		return {
+			...rq,
+			...result,
+		};
+	}
+
 	private async sendRequest<T extends AIActionType>(
 		action: T,
 		getMessages: (
@@ -992,11 +1113,9 @@ export class AIProviderService implements Disposable {
 
 						if (isSubscriptionPaid(sub)) {
 							const plan =
-								compareSubscriptionPlans(sub.plan.actual.id, SubscriptionPlanId.Advanced) <= 0
-									? SubscriptionPlanId.Business
-									: SubscriptionPlanId.Advanced;
+								compareSubscriptionPlans(sub.plan.actual.id, 'advanced') <= 0 ? 'teams' : 'advanced';
 
-							const upgrade = { title: `Upgrade to ${getSubscriptionPlanTier(plan)}` };
+							const upgrade = { title: `Upgrade to ${getSubscriptionPlanName(plan)}` };
 							const result = await window.showErrorMessage(
 								"This AI feature isn't included in your current plan. Please upgrade and try again.",
 								upgrade,
@@ -1014,7 +1133,7 @@ export class AIProviderService implements Disposable {
 							);
 
 							if (result === upgrade) {
-								void this.container.subscription.upgrade(SubscriptionPlanId.Pro, source);
+								void this.container.subscription.upgrade('pro', source);
 							}
 						}
 
@@ -1137,9 +1256,9 @@ export class AIProviderService implements Disposable {
 		} else if (Array.isArray(changesOrRepo)) {
 			changes = changesOrRepo.join('\n');
 		} else {
-			let diff = await changesOrRepo.git.diff().getDiff?.(uncommittedStaged);
+			let diff = await changesOrRepo.git.diff.getDiff?.(uncommittedStaged);
 			if (!diff?.contents) {
-				diff = await changesOrRepo.git.diff().getDiff?.(uncommitted);
+				diff = await changesOrRepo.git.diff.getDiff?.(uncommitted);
 				if (!diff?.contents) throw new Error('No changes to generate a commit message from.');
 			}
 			if (options?.cancellation?.isCancellationRequested) return undefined;
@@ -1408,7 +1527,7 @@ export async function prepareCompareDataForAIRequest(
 	},
 ): Promise<{ diff: string; logMessages: string } | undefined> {
 	const { cancellation, reportNoDiffService, reportNoCommitsService, reportNoChanges } = options ?? {};
-	const diffService = repo.git.diff();
+	const diffService = repo.git.diff;
 	if (diffService?.getDiff === undefined) {
 		if (reportNoDiffService) {
 			reportNoDiffService();
@@ -1416,7 +1535,7 @@ export async function prepareCompareDataForAIRequest(
 		}
 	}
 
-	const commitsService = repo.git.commits();
+	const commitsService = repo.git.commits;
 	if (commitsService?.getLog === undefined) {
 		if (reportNoCommitsService) {
 			reportNoCommitsService();

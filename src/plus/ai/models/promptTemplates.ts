@@ -28,6 +28,14 @@ interface CreatePullRequestPromptTemplateContext {
 	instructions?: string;
 }
 
+interface RebasePromptTemplateContext {
+	diff: string;
+	data?: string;
+	commits?: string;
+	context?: string;
+	instructions?: string;
+}
+
 interface ExplainChangesPromptTemplateContext {
 	diff: string;
 	message: string;
@@ -45,6 +53,7 @@ export type PromptTemplateType =
 	| 'generate-stashMessage'
 	| 'generate-changelog'
 	| `generate-create-${'cloudPatch' | 'codeSuggestion' | 'pullRequest'}`
+	| 'generate-rebase'
 	| 'explain-changes';
 
 type PromptTemplateVersions = '' | '_v2';
@@ -62,6 +71,8 @@ export type PromptTemplateContext<T extends PromptTemplateType> = T extends 'gen
 	? CreatePullRequestPromptTemplateContext
 	: T extends 'generate-changelog'
 	? ChangelogPromptTemplateContext
+	: T extends 'generate-rebase'
+	? RebasePromptTemplateContext
 	: T extends 'explain-changes'
 	? ExplainChangesPromptTemplateContext
 	: never;

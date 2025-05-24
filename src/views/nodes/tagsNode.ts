@@ -33,7 +33,7 @@ export class TagsNode extends CacheableChildrenViewNode<'tags', ViewsWithTagsNod
 
 	async getChildren(): Promise<ViewNode[]> {
 		if (this.children == null) {
-			const tags = await this.repo.git.tags().getTags({ sort: true });
+			const tags = await this.repo.git.tags.getTags({ sort: true });
 			if (tags.values.length === 0) return [new MessageNode(this.view, this, 'No tags could be found.')];
 
 			// TODO@eamodio handle paging
@@ -46,7 +46,7 @@ export class TagsNode extends CacheableChildrenViewNode<'tags', ViewsWithTagsNod
 				tagNodes,
 				n => n.tag.name.split('/'),
 				(...paths) => paths.join('/'),
-				this.view.config.files.compact,
+				this.view.config.branches.compact,
 			);
 
 			const root = new BranchOrTagFolderNode(this.view, this, 'tag', hierarchy, this.repo.path, '', undefined);

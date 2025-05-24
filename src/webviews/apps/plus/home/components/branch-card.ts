@@ -4,8 +4,7 @@ import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { when } from 'lit/directives/when.js';
-import type { GlCommands } from '../../../../../constants.commands';
-import type { WebviewIds, WebviewViewIds } from '../../../../../constants.views';
+import type { GlCommands, PlusCommands, WebviewCommands, WebviewViewCommands } from '../../../../../constants.commands';
 import type { LaunchpadCommandArgs } from '../../../../../plus/launchpad/launchpad';
 import {
 	actionGroupMap,
@@ -24,6 +23,7 @@ import type {
 	GetOverviewBranch,
 	OpenInGraphParams,
 	OpenInTimelineParams,
+	OpenWorktreeCommandArgs,
 	State,
 } from '../../../../home/protocol';
 import { stateContext } from '../../../home/context';
@@ -702,7 +702,7 @@ export abstract class GlBranchCardBase extends GlElement {
 	}
 
 	protected createWebviewCommandLink<T>(
-		command: `${WebviewIds | WebviewViewIds}.${string}` | `gitlens.plus.${string}`,
+		command: WebviewCommands | WebviewViewCommands | PlusCommands,
 		args?: T | any,
 	): string {
 		return createWebviewCommandLink<T>(
@@ -977,8 +977,13 @@ export class GlBranchCard extends GlBranchCardBase {
 			actions.push(
 				html`<action-item
 					label="Open Worktree"
+					alt-label="Open Worktree in New Window"
 					icon="browser"
+					alt-icon="empty-window"
 					href=${this.createCommandLink('gitlens.home.openWorktree')}
+					alt-href=${this.createCommandLink<OpenWorktreeCommandArgs>('gitlens.home.openWorktree', {
+						location: 'newWindow',
+					})}
 				></action-item>`,
 			);
 		} else {
@@ -1003,8 +1008,13 @@ export class GlBranchCard extends GlBranchCardBase {
 			actions.push(
 				html`<action-item
 					label="Open Worktree"
+					alt-label="Open Worktree in New Window"
 					icon="browser"
+					alt-icon="empty-window"
 					href=${this.createCommandLink('gitlens.home.openWorktree')}
+					alt-href=${this.createCommandLink<OpenWorktreeCommandArgs>('gitlens.home.openWorktree', {
+						location: 'newWindow',
+					})}
 				></action-item>`,
 			);
 
@@ -1027,7 +1037,7 @@ export class GlBranchCard extends GlBranchCardBase {
 				} else {
 					actions.push(
 						html`<action-item
-							label="Explain Branch (Preview)"
+							label="Explain Branch Changes (Preview)"
 							icon="sparkle"
 							href=${this.createCommandLink('gitlens.ai.explainBranch:home')}
 						></action-item>`,
@@ -1046,7 +1056,7 @@ export class GlBranchCard extends GlBranchCardBase {
 			if (aiEnabled) {
 				actions.push(
 					html`<action-item
-						label="Explain Branch (Preview)"
+						label="Explain Branch Changes (Preview)"
 						icon="sparkle"
 						href=${this.createCommandLink('gitlens.ai.explainBranch:home')}
 					></action-item>`,
@@ -1066,7 +1076,7 @@ export class GlBranchCard extends GlBranchCardBase {
 			html` <action-item
 				label="Visualize Branch History"
 				icon="graph-scatter"
-				href=${createCommandLink('gitlens.home.visualizeHistory.branch:home', {
+				href=${createCommandLink('gitlens.visualizeHistory.branch:home', {
 					type: 'branch',
 					repoPath: this.repo,
 					branchId: this.branch.id,

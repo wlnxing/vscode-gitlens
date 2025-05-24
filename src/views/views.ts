@@ -46,7 +46,7 @@ import { ViewCommands } from './viewCommands';
 import { WorkspacesView } from './workspacesView';
 import { WorktreesView } from './worktreesView';
 
-const defaultScmGroupedViews: Record<GroupableTreeViewTypes, boolean> = Object.freeze({
+const defaultScmGroupedViews = {
 	commits: true,
 	branches: true,
 	remotes: true,
@@ -58,7 +58,7 @@ const defaultScmGroupedViews: Record<GroupableTreeViewTypes, boolean> = Object.f
 	repositories: false,
 	searchAndCompare: false,
 	launchpad: false,
-});
+} as const;
 
 export class Views implements Disposable {
 	private readonly _disposable: Disposable;
@@ -85,6 +85,10 @@ export class Views implements Disposable {
 		return this._scmGroupedViews;
 	}
 
+	private _lastSelectedByView = new Map<
+		GroupableTreeViewTypes,
+		{ node: ViewNode; parents: ViewNode[]; expanded: boolean }
+	>();
 	private _welcomeDismissed = false;
 
 	constructor(
@@ -382,7 +386,6 @@ export class Views implements Disposable {
 	private registerViews(): Disposable[] {
 		return [
 			(this._draftsView = new DraftsView(this.container)),
-			// (this._fileHistoryView = new FileHistoryView(this.container)),
 			(this._lineHistoryView = new LineHistoryView(this.container)),
 			(this._pullRequestView = new PullRequestView(this.container)),
 			(this._workspacesView = new WorkspacesView(this.container)),
@@ -483,7 +486,43 @@ export class Views implements Disposable {
 
 	private setScmGroupedView<T extends GroupableTreeViewTypes>(type: T, focus?: boolean) {
 		if (this._scmGroupedView != null) {
-			return this._scmGroupedView.setView(type, focus);
+			// Save current selection before switching views
+			let { view } = this._scmGroupedView;
+			if (view) {
+				const node: ViewNode | undefined = view.selection?.[0];
+				if (node != null) {
+					const parents: ViewNode[] = [];
+
+					let parent: ViewNode | undefined = node;
+					while (true) {
+						parent = parent.getParent();
+						if (parent == null) break;
+
+						parents.unshift(parent);
+					}
+
+					this._lastSelectedByView.set(view.type, {
+						node: node,
+						parents: parents,
+						expanded: view.isNodeExpanded(node),
+					});
+				}
+			}
+
+			view = this._scmGroupedView.setView(type, focus);
+
+			// Restore the last selection for this view type (if any)
+			if (view) {
+				const selection = this._lastSelectedByView.get(type);
+				if (selection != null) {
+					setTimeout(async () => {
+						const { node, parents, expanded } = selection;
+						await view.revealDeep(node, parents, { expand: expanded, focus: focus ?? false, select: true });
+					}, 1);
+				}
+			}
+
+			return view;
 		}
 
 		if (!this.scmGroupedViews?.has(type)) {
@@ -907,8 +946,7 @@ export class Views implements Disposable {
 			case 'drafts':
 				return this.drafts.show();
 			case 'fileHistory':
-				return show('contributors', this._fileHistoryView);
-			// return this.fileHistory.show();
+				return show('fileHistory', this._fileHistoryView);
 			case 'launchpad':
 				return show('launchpad', this._launchpadView);
 			case 'lineHistory':
@@ -935,7 +973,7 @@ export class Views implements Disposable {
 	}
 }
 
-function getGroupedViews(cfg: Record<GroupableTreeViewTypes, boolean>) {
+function getGroupedViews(cfg: Readonly<Record<GroupableTreeViewTypes, boolean>>) {
 	const groupedViews = new Set<GroupableTreeViewTypes>();
 
 	for (const [key, value] of Object.entries(cfg) as [GroupableTreeViewTypes, boolean][]) {

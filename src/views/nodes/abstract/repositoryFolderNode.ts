@@ -20,22 +20,17 @@ export abstract class RepositoryFolderNode<
 	TView extends View = View,
 	TChild extends ViewNode = ViewNode,
 > extends SubscribeableViewNode<'repo-folder', TView> {
-	protected override splatted = true;
-
 	constructor(
 		uri: GitUri,
 		view: TView,
 		protected override readonly parent: ViewNode,
 		public readonly repo: Repository,
-		splatted: boolean,
 		private readonly options?: { showBranchAndLastFetched?: boolean },
 	) {
 		super('repo-folder', uri, view, parent);
 
 		this.updateContext({ repository: this.repo });
 		this._uniqueId = getViewNodeId(this.type, this.context);
-
-		this.splatted = splatted;
 	}
 
 	private _child: TChild | undefined;
@@ -67,9 +62,7 @@ export abstract class RepositoryFolderNode<
 	}
 
 	async getTreeItem(): Promise<TreeItem> {
-		this.splatted = false;
-
-		const branch = await this.repo.git.branches().getBranch();
+		const branch = await this.repo.git.branches.getBranch();
 		const ahead = Boolean(branch?.upstream?.state.ahead);
 		const behind = Boolean(branch?.upstream?.state.behind);
 
@@ -118,7 +111,9 @@ export abstract class RepositoryFolderNode<
 			let providerName;
 			if (branch.upstream != null) {
 				const providers = getHighlanderProviders(
-					await this.view.container.git.remotes(branch.repoPath).getRemotesWithProviders(),
+					await this.view.container.git
+						.getRepositoryService(branch.repoPath)
+						.remotes.getRemotesWithProviders(),
 				);
 				providerName = providers?.length ? providers[0].name : undefined;
 			} else {

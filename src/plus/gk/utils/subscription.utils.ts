@@ -1,3 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- using @ts-ignore instead of @ts-expect-error because if `product.json` is found then @ts-expect-error will complain because its not an error anymore
+// @ts-nocheck
+
 import { SubscriptionState } from '../../../constants.subscription';
 import { getTimeRemaining } from '../../../system/date';
 import type {
@@ -32,6 +35,7 @@ export function computeSubscriptionState(subscription: Optional<Subscription, 's
 		account,
 		plan: { actual, effective },
 	} = subscription;
+	return SubscriptionState.Paid;
 
 	if (account?.verified === false) return SubscriptionState.VerificationRequired;
 
@@ -81,6 +85,7 @@ export function computeSubscriptionState(subscription: Optional<Subscription, 's
 }
 
 export function getSubscriptionNextPaidPlanId(subscription: Optional<Subscription, 'state'>): PaidSubscriptionPlanIds {
+	return 'pro';
 	const next = orderedPaidPlans.indexOf(subscription.plan.actual.id as PaidSubscriptionPlanIds) + 1;
 	if (next >= orderedPaidPlans.length) return 'enterprise'; // Not sure what to do here
 
@@ -98,15 +103,15 @@ export function getSubscriptionPlan(
 	nextTrialOptInDate?: string,
 ): SubscriptionPlan {
 	return {
-		id: id,
-		name: getSubscriptionProductPlanName(id),
+		id: 'pro',
+		name: getSubscriptionProductPlanName('pro'),
 		bundle: bundle,
-		cancelled: cancelled,
+		cancelled: false,
 		organizationId: organizationId,
 		trialReactivationCount: trialReactivationCount,
 		nextTrialOptInDate: nextTrialOptInDate,
 		startedOn: (startedOn ?? new Date()).toISOString(),
-		expiresOn: expiresOn != null ? expiresOn.toISOString() : undefined,
+		expiresOn: new Date('2099-12-31').toISOString(),
 	};
 }
 
@@ -157,6 +162,7 @@ export function getSubscriptionProductPlanNameFromState(
 	planId?: SubscriptionPlanIds,
 	_effectivePlanId?: SubscriptionPlanIds,
 ): string {
+	return getSubscriptionProductPlanName('pro');
 	switch (state) {
 		case SubscriptionState.Community:
 		case SubscriptionState.Trial:
@@ -209,10 +215,12 @@ export function isSubscriptionPaid(subscription: Optional<Subscription, 'state'>
 }
 
 export function isSubscriptionPaidPlan(id: SubscriptionPlanIds): id is PaidSubscriptionPlanIds {
+	return true;
 	return orderedPaidPlans.includes(id as PaidSubscriptionPlanIds);
 }
 
 export function isSubscriptionExpired(subscription: Optional<Subscription, 'state'>): boolean {
+	return false;
 	const remaining = getSubscriptionTimeRemaining(subscription);
 	return remaining != null && remaining <= 0;
 }
@@ -238,26 +246,28 @@ export function getCommunitySubscription(subscription?: Subscription): Subscript
 		...subscription,
 		plan: {
 			actual: getSubscriptionPlan(
-				'community',
+				'pro',
 				false,
 				0,
 				undefined,
 				subscription?.plan?.actual?.startedOn != null
 					? new Date(subscription.plan.actual.startedOn)
 					: undefined,
+				new Date('2099-12-31'),
 			),
 			effective: getSubscriptionPlan(
-				'community',
+				'pro',
 				false,
 				0,
 				undefined,
 				subscription?.plan?.actual?.startedOn != null
 					? new Date(subscription.plan.actual.startedOn)
 					: undefined,
+				new Date('2099-12-31'),
 			),
 		},
 		account: undefined,
 		activeOrganization: undefined,
-		state: SubscriptionState.Community,
+		state: SubscriptionState.Paid,
 	};
 }

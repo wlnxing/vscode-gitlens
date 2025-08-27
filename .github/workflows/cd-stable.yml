@@ -1,9 +1,12 @@
 name: Publish Stable
 
 on:
-    push:
-        tags:
-            - 'v*.*.*' # Push events to matching v*, i.e. v1.0, v20.15.10
+  push:
+    branches:
+      - main # 仅主分支
+    paths:
+      - 'package.json' # 仅当 package.json 文件发生变化时触发
+  workflow_dispatch: # 允许手动触发工作流
 
 jobs:
     build:
@@ -14,6 +17,16 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+            - name: Check if version changed
+              id: version_check
+              if: github.event_name == 'push'
+              run: |
+                git fetch origin ${{ github.event.before }}
+                PREV_VERSION=$(git show ${{ github.event.before }}:package.json | jq -r .version)
+                CURR_VERSION=$(jq -r .version package.json)
+                echo "Previous version: $PREV_VERSION"
+                echo "Current version: $CURR_VERSION"
+                if [ "$PREV_VERSION" == "$CURR_VERSION" ]; then echo "Version did not change, skipping workflow."; exit 78; fi
             - name: Setup node
               uses: actions/setup-node@v4
               with:
@@ -24,16 +37,16 @@ jobs:
                   version: 10
             - name: Setup Environment
               run: node -e "console.log('PACKAGE_VERSION=' + require('./package.json').version + '\nPACKAGE_NAME=' + require('./package.json').name + '-' + require('./package.json').version)" >> $GITHUB_ENV
-            - name: Verify versions
-              run: node -e "if ('refs/tags/v' + '${{ env.PACKAGE_VERSION }}' !== '${{ github.ref }}') { console.log('::error' + 'Version Mismatch. refs/tags/v' + '${{ env.PACKAGE_VERSION }}', '${{ github.ref }}'); throw Error('Version Mismatch')} "
+            # - name: Verify versions
+            #   run: node -e "if ('refs/tags/v' + '${{ env.PACKAGE_VERSION }}' !== '${{ github.ref }}') { console.log('::error' + 'Version Mismatch. refs/tags/v' + '${{ env.PACKAGE_VERSION }}', '${{ github.ref }}'); throw Error('Version Mismatch')} "
             - name: Install
               run: pnpm install
             - name: Package extension
               run: pnpm run package
             - name: Publish Extension to VS Code Marketplace
               run: pnpm vsce publish --no-dependencies --packagePath ./${{ env.PACKAGE_NAME }}.vsix -p ${{ secrets.GITLENS_VSCODE_MARKETPLACE_PAT }}
-            - name: Publish extension to OpenVSIX
-              run: pnpm ovsx publish ./${{ env.PACKAGE_NAME }}.vsix -p ${{ secrets.GITLENS_OPENVSIX_PAT }}
+            # - name: Publish extension to OpenVSIX
+            #   run: pnpm ovsx publish ./${{ env.PACKAGE_NAME }}.vsix -p ${{ secrets.GITLENS_OPENVSIX_PAT }}
             - name: Generate Changelog
               id: changelog
               uses: mindsers/changelog-reader-action@v2

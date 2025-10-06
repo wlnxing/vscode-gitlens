@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixes Git diff of a renamed file is shown as a new file ([#4246](https://github.com/gitkraken/vscode-gitlens/issues/4246))
+- Fixes typos ([#4345](https://github.com/gitkraken/vscode-gitlens/issues/4345) &mdash; thanks to [PR #4346](https://github.com/gitkraken/vscode-gitlens/pull/4346) by Noritaka Kobayashi ([@noritaka1166](https://github.com/noritaka1166)))
+- Fixes issue where the _Commit Graph_ hover would not hide when going from the hover to the graph background (not another row)
+
+## [17.5.1] - 2025-09-24
+
+### Fixed
+
+- Fixes Cursor theme color issues with alerts and feature gates ([#4608](https://github.com/gitkraken/vscode-gitlens/issues/4608))
+- Fixes MCP installation completed message not showing after running the _Reinstall GitKraken MCP Server_ command
+
+## [17.5.0] - 2025-09-23
+
+### Added
+
+- Adds the GitKraken MCP for Git and integration enhanced AI chat workflows — [learn more](https://help.gitkraken.com/mcp/mcp-getting-started/)
+  - Leverage Git and your integrations (issues, PRs, etc) to provide context and perform actions in AI chat
+- Adds rich Linear integration with autolinks, start work, Launchpad, and more ([#4543](https://github.com/gitkraken/vscode-gitlens/issues/4543), [#4579](https://github.com/gitkraken/vscode-gitlens/issues/4579))
+- Adds support for the [GitKraken Student plan](https://www.gitkraken.com/github-student-developer-pack-bundle)
+
+### Changed
+
+- Improves AI provider/model fallback handling for better reliability
+
+### Fixed
+
+- Fixes connection flow when multiple integrations need to be connected
+
 ## [17.4.1] - 2025-08-26
 
 ### Fixed
@@ -6333,7 +6363,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Initial release but still heavily a work in progress.
 
-[unreleased]: https://github.com/gitkraken/vscode-gitlens/compare/v17.4.1...HEAD
+[unreleased]: https://github.com/gitkraken/vscode-gitlens/compare/v17.5.1...HEAD
+[17.5.1]: https://github.com/gitkraken/vscode-gitlens/compare/v17.5.0...gitkraken:v17.5.1
+[17.5.0]: https://github.com/gitkraken/vscode-gitlens/compare/v17.4.1...gitkraken:v17.5.0
 [17.4.1]: https://github.com/gitkraken/vscode-gitlens/compare/v17.4.0...gitkraken:v17.4.1
 [17.4.0]: https://github.com/gitkraken/vscode-gitlens/compare/v17.3.4...gitkraken:v17.4.0
 [17.3.4]: https://github.com/gitkraken/vscode-gitlens/compare/v17.3.3...gitkraken:v17.3.4

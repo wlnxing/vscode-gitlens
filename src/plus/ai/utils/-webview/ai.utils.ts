@@ -4,6 +4,7 @@ import { Schemes } from '../../../../constants';
 import type { AIProviders } from '../../../../constants.ai';
 import type { Container } from '../../../../container';
 import type { MarkdownContentMetadata } from '../../../../documents/markdown';
+import { CancellationError } from '../../../../errors';
 import { decodeGitLensRevisionUriAuthority } from '../../../../git/gitUri.authority';
 import { createDirectiveQuickPickItem, Directive } from '../../../../quickpicks/items/directive';
 import { configuration } from '../../../../system/-webview/configuration';
@@ -17,8 +18,8 @@ import { ensureAccountQuickPick } from '../../../gk/utils/-webview/acount.utils'
 import type { AIResult, AIResultContext } from '../../aiProviderService';
 import type { AIActionType, AIModel } from '../../models/model';
 
-export function ensureAccount(container: Container, silent: boolean): Promise<boolean> {
-	return ensureAccountQuickPick(
+export async function ensureAccount(container: Container, silent: boolean): Promise<boolean> {
+	const result = await ensureAccountQuickPick(
 		container,
 		createDirectiveQuickPickItem(Directive.Noop, undefined, {
 			label: 'Use AI-powered GitLens features like Generate Commit Message, Explain Commit, and more',
@@ -27,6 +28,12 @@ export function ensureAccount(container: Container, silent: boolean): Promise<bo
 		{ source: 'ai' },
 		silent,
 	);
+
+	if (!result && !silent) {
+		throw new CancellationError();
+	}
+
+	return result;
 }
 
 export function getActionName(action: AIActionType): string {
@@ -189,15 +196,15 @@ export function getOrgAIConfig(): OrgAIConfig {
 	};
 }
 
-export function getOrgAIProviderOfType(type: AIProviders, orgAiConfig?: OrgAIConfig): OrgAIProvider {
-	orgAiConfig ??= getOrgAIConfig();
-	if (!orgAiConfig.aiEnabled) return { type: type, enabled: false };
-	if (!orgAiConfig.enforceAiProviders) return { type: type, enabled: true };
-	return orgAiConfig.aiProviders[type] ?? { type: type, enabled: false };
+export function getOrgAIProviderOfType(type: AIProviders, orgAIConfig?: OrgAIConfig): OrgAIProvider {
+	orgAIConfig ??= getOrgAIConfig();
+	if (!orgAIConfig.aiEnabled) return { type: type, enabled: false };
+	if (!orgAIConfig.enforceAiProviders) return { type: type, enabled: true };
+	return orgAIConfig.aiProviders[type] ?? { type: type, enabled: false };
 }
 
-export function isProviderEnabledByOrg(type: AIProviders, orgAiConfig?: OrgAIConfig): boolean {
-	return getOrgAIProviderOfType(type, orgAiConfig).enabled;
+export function isProviderEnabledByOrg(type: AIProviders, orgAIConfig?: OrgAIConfig): boolean {
+	return getOrgAIProviderOfType(type, orgAIConfig).enabled;
 }
 
 /**
